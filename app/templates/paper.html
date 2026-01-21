@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 style="margin-top:0;">Article Details</h2>
+
+<a href="{{ request.headers.get('referer', '/search') }}"
+   class="back-link">
+  <span class="back-arrow">←</span>
+  <span class="back-text">Back to results</span>
+</a>
+
+{% if error %}
+  <div class="callout-err" style="margin: 0.75rem 0;">
+    {{ error }}
+  </div>
+{% endif %}
+
+{% if paper %}
+  <div class="card" style="margin: 1rem 0;">
+    <h3 style="margin:0 0 0.5rem 0;">{{ paper.title }}</h3>
+
+    <div style="color:#555; margin-bottom:0.35rem;">
+      <strong>ID:</strong> {{ paper.pmid }}
+      {% if paper.year %} | <strong>Year:</strong> {{ paper.year }}{% endif %}
+      {% if paper.journal %} | <strong>Journal:</strong> {{ paper.journal }}{% endif %}
+      {% if paper.doi %} | <strong>DOI:</strong> {{ paper.doi }}{% endif %}
+    </div>
+
+    {% if paper.authors %}
+      <div style="color:#555; margin-bottom:0.5rem;">
+        <strong>Authors:</strong> {{ paper.authors }}
+      </div>
+    {% endif %}
+
+    <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-top:0.25rem;">
+      {# Publisher link: werkt voor PubMed én Europe PMC zodra DOI aanwezig is #}
+      {% if paper.doi %}
+        <a href="https://doi.org/{{ paper.doi }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+      {% elif paper.publisher_url %}
+        <a href="{{ paper.publisher_url }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+      {% endif %}
+
+      {% if paper.full_text_url %}
+        <a class="badge" href="{{ paper.full_text_url }}" target="_blank" rel="noopener">
+          {{ paper.full_text_label }}
+        </a>
+      {% endif %}
+
+      {# Open-in link: NIET via paper.url voor PubMed, maar altijd via PMID #}
+      {% if source == "pubmed" %}
+        <a href="https://pubmed.ncbi.nlm.nih.gov/{{ paper.pmid }}/" target="_blank" rel="noopener">Open in PubMed</a>
+      {% else %}
+        {% if paper.url %}
+          <a href="{{ paper.url }}" target="_blank" rel="noopener">Open in Europe PMC</a>
+        {% else %}
+          <a href="https://europepmc.org/search?query={{ paper.pmid | urlencode }}" target="_blank" rel="noopener">Open in Europe PMC</a>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {% if paper.abstract %}
+      <hr/>
+      <div style="color:#333; line-height:1.45;">
+        {{ paper.abstract }}
+      </div>
+    {% endif %}
+
+    {% if paper.mesh_terms and paper.mesh_terms|length > 0 %}
+      <hr/>
+      <div style="font-weight:600; margin-bottom:6px;">MeSH terms</div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        {% for t in paper.mesh_terms %}
+          <span class="badge">{{ t }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+{% else %}
+  <p>No article found.</p>
+{% endif %}
+
+{% endblock %}

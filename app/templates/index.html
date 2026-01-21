@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+<form action="/search" method="get">
+  <input name="q" placeholder="Zoekterm" size="50" />
+
+  <select name="source">
+    <option value="pubmed">PubMed</option>
+    <option value="europe_pmc">Europe PMC</option>
+  </select>
+
+  <button type="submit">Zoek</button>
+</form>
+{% endblock %}

@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 style="margin-top:0;">Search Results</h2>
+
+<form action="/search" method="get" style="margin-bottom: 1rem;">
+  <input name="q" value="{{ q }}" placeholder="Zoekterm" size="50" />
+
+  <select name="source">
+    <option value="pubmed" {% if source == "pubmed" %}selected{% endif %}>PubMed</option>
+    <option value="europe_pmc" {% if source == "europe_pmc" %}selected{% endif %}>Europe PMC</option>
+  </select>
+
+  <select name="n">
+    {% for size in [10, 20, 50] %}
+      <option value="{{ size }}" {% if n == size %}selected{% endif %}>{{ size }}</option>
+    {% endfor %}
+  </select>
+
+  <select name="sort">
+    <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>Relevance</option>
+    <option value="year_desc" {% if sort == "year_desc" %}selected{% endif %}>Most recent first</option>
+  </select>
+
+  <input name="year_min" value="{{ year_min }}" placeholder="Year (from)" size="10" />
+  <input name="year_max" value="{{ year_max }}" placeholder="Year (to)" size="10" />
+
+  <select name="has_abstract">
+    <option value="0" {% if has_abstract == 0 %}selected{% endif %}>Any</option>
+    <option value="1" {% if has_abstract == 1 %}selected{% endif %}>Abstract only</option>
+  </select>
+
+  {% if source == "pubmed" %}
+    <!-- Multi-MeSH input: use | or , (we normalize server-side) -->
+    <input name="mesh" value="{{ mesh }}" placeholder="MeSH terms (comma or | separated)" size="26" />
+  {% endif %}
+
+  <button type="submit" class="btn-primary" style="margin-left: 6px;">Search</button>
+
+  <!-- Reset: keep same button presence; reset everything including mesh -->
+  <a href="/search?source={{ source }}" class="btn-secondary" style="margin-left: 0.5rem;">Reset filters</a>
+</form>
+
+{% if warning %}
+  <div class="callout-warn" style="margin: 0.75rem 0;">
+    {{ warning }}
+  </div>
+{% endif %}
+
+{% if error %}
+  <div class="callout-err" style="margin: 0.75rem 0;">
+    {{ error }}
+  </div>
+{% endif %}
+
+<div style="margin: 0.75rem 0;">
+  <strong>{{ "{:,}".format(total_count) }}</strong> records — page <strong>{{ page }}</strong> of <strong>{{ total_pages }}</strong>
+</div>
+
+{% if source == "pubmed" %}
+  <div class="muted" style="margin: 0.25rem 0 1rem 0;">
+    Note: PubMed ESearch can paginate only the first 10,000 results for a given query.
+  </div>
+{% endif %}
+
+<div style="display:flex; gap: 0.75rem; align-items:center; margin-bottom: 1rem;">
+  {% if page < total_pages %}
+    <a href="/search?q={{ q | urlencode }}&source={{ source }}&page={{ page+1 }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh | urlencode }}{% endif %}">Next</a>
+  {% endif %}
+
+  <a href="/search?q={{ q | urlencode }}&source={{ source }}&page={{ total_pages }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh | urlencode }}{% endif %}">Last</a>
+
+  <form action="/search" method="get" style="display:inline;">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="source" value="{{ source }}">
+    <input type="hidden" name="n" value="{{ n }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="year_min" value="{{ year_min }}">
+    <input type="hidden" name="year_max" value="{{ year_max }}">
+    <input type="hidden" name="has_abstract" value="{{ has_abstract }}">
+    {% if source == "pubmed" %}
+      <input type="hidden" name="mesh" value="{{ mesh }}">
+    {% endif %}
+
+    Go to page
+    <input name="page" value="{{ page }}" size="4">
+    <button type="submit">Go</button>
+  </form>
+
+  <div style="margin-left:auto;">
+    Export:
+    <a href="/export/csv?q={{ q|urlencode }}&source={{ source }}&page={{ page }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh }}{% endif %}">CSV (this page)</a>
+    |
+    <a href="/export/ris?q={{ q|urlencode }}&source={{ source }}&page={{ page }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh }}{% endif %}">RIS (this page)</a>
+
+    {% if source == "pubmed" %}
+      |
+      <a href="/export/csv?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}&mesh={{ mesh }}">CSV (first {{ bulk_limit }})</a>
+      |
+      <a href="/export/ris?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}&mesh={{ mesh }}">RIS (first {{ bulk_limit }})</a>
+    {% else %}
+      |
+      <a href="/export/csv?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}">CSV (first {{ bulk_limit }})</a>
+      |
+      <a href="/export/ris?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}">RIS (first {{ bulk_limit }})</a>
+    {% endif %}
+  </div>
+</div>
+
+<hr/>
+
+{% if source == "pubmed" and mesh_suggestions and mesh_suggestions|length > 0 %}
+  {# Multi-MeSH state (server normalized as "Term1|Term2|...") #}
+  {% set active_mesh = (mesh or "").split("|") if mesh else [] %}
+
+  <div class="card" style="margin: 0.75rem 0;">
+    <div style="font-weight:600; margin-bottom:8px;">Refine with MeSH</div>
+
+    {% for item in mesh_suggestions %}
+      {% set term = item.term %}
+      {% set is_active = term in active_mesh %}
+
+      {# Toggle term in/out of active_mesh #}
+      {% if is_active %}
+        {% set next_list = active_mesh | reject("equalto", term) | list %}
+      {% else %}
+        {% set next_list = active_mesh + [term] %}
+      {% endif %}
+      {% set next_mesh = next_list | join("|") %}
+
+      <a
+        class="badge {% if is_active %}active{% endif %}"
+        href="/search?q={{ q | urlencode }}&source={{ source }}&n={{ n }}&page=1&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}&mesh={{ next_mesh | urlencode }}"
+        title="{% if is_active %}Remove{% else %}Add{% endif %} MeSH: {{ term }}"
+        style="margin: 4px 6px 0 0;"
+      >
+        {{ term }} ({{ item.count }})
+      </a>
+    {% endfor %}
+
+    {% if mesh %}
+      <div class="muted" style="margin-top:10px;">
+        Active MeSH: <strong>{{ mesh }}</strong>
+        (click a highlighted chip to remove)
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% if papers and papers|length > 0 %}
+  {% for p in papers %}
+    <div class="card" style="margin: 1rem 0;">
+      <h3 style="margin:0 0 0.5rem 0;">{{ p.title }}</h3>
+
+      <div style="color:#555; margin-bottom:0.35rem;">
+        <strong>ID:</strong> {{ p.pmid }}
+        {% if p.year %} | <strong>Year:</strong> {{ p.year }}{% endif %}
+        {% if p.journal %} | <strong>Journal:</strong> {{ p.journal }}{% endif %}
+        {% if p.doi %} | <strong>DOI:</strong> {{ p.doi }}{% endif %}
+      </div>
+
+      {% if p.authors %}
+        <div style="color:#555; margin-bottom:0.5rem;">
+          <strong>Authors:</strong> {{ p.authors }}
+        </div>
+      {% endif %}
+
+      <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+        {% if source == "pubmed" %}
+          <a href="/paper/{{ p.pmid }}">View details</a>
+          <a href="https://pubmed.ncbi.nlm.nih.gov/{{ p.pmid }}/" target="_blank" rel="noopener">Open in PubMed</a>
+
+          {# ✅ Publisher link for PubMed when DOI exists #}
+          {% if p.doi %}
+            <a href="https://doi.org/{{ p.doi | urlencode }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+          {% endif %}
+
+        {% else %}
+          <a href="/paper/europe_pmc/{{ p.pmid }}">View details</a>
+
+          {% if p.publisher_url %}
+            <a href="{{ p.publisher_url }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+          {% endif %}
+
+          {% if p.full_text_url %}
+            <a class="badge" href="{{ p.full_text_url }}" target="_blank" rel="noopener">{{ p.full_text_label }}</a>
+          {% endif %}
+
+          {% if p.url %}
+            <a href="{{ p.url }}" target="_blank" rel="noopener">Open in Europe PMC</a>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      {% if p.abstract %}
+        <details style="margin-top: 0.75rem;">
+          <summary>Show abstract</summary>
+          <div style="margin-top: 0.5rem; color:#333;">{{ p.abstract }}</div>
+        </details>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <p>No results.</p>
+{% endif %}
+
+{% endblock %}

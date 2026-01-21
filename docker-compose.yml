@@ -1,0 +1,9 @@
+services:
+  litsearch:
+    build: .
+    container_name: litsearch
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    restart: unless-stopped
