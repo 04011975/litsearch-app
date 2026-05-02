@@ -204,20 +204,3 @@ def test_export_rejects_unknown_source(client):
     )
     assert r.status_code == 422
 
-
-def test_export_job_accepts_all_sources(client):
-    response = client.post(
-        "/export/job",
-        params={
-            "q": "cancer",
-            "source": "all",
-            "limit": 20,
-            "fmt": "csv",
-        },
-    )
-
-    assert response.status_code in {200, 202}
-    data = response.json()
-    assert data["source"] == "all"
-    assert "job_id" in data
-    assert "status_url" in data

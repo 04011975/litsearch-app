@@ -58,6 +58,7 @@ async def test_pubmed_search_date_desc_returns_results():
     assert len(res.pmids) > 0
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_pubmed_fetch_details_has_expected_fields():
     res = await pubmed_search_page(
