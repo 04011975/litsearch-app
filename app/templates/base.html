@@ -6,85 +6,158 @@
   <title>{% block title %}LitSearch{% endblock %}</title>
 
   <style>
-    :root { --border:#ddd; --text:#111; --muted:#666; --bg:#fff; --chip:#f7f7f7; --warn:#fff7d6; --err:#ffeaea; }
-    body { font-family: Arial, sans-serif; margin: 2rem; max-width: 1100px; color: var(--text); background: var(--bg); }
+    :root {
+      --border:#ddd;
+      --text:#111;
+      --muted:#666;
+      --bg:#fff;
+      --chip:#f7f7f7;
+      --warn:#fff7d6;
+      --err:#ffeaea;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      max-width: 1100px;
+      color: var(--text);
+      background: var(--bg);
+    }
+
     a { color: inherit; }
+
     .muted { color: var(--muted); font-size: 0.92rem; }
-    .card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
     .btn-primary {
-      padding: 10px 12px; border: 1px solid #222; border-radius: 8px;
-      background: #222; color: #fff; cursor: pointer; text-decoration: none; display: inline-block;
+      padding: 10px 12px;
+      border: 1px solid #222;
+      border-radius: 8px;
+      background: #222;
+      color: #fff;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
     }
+
     .btn-secondary {
-      padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px;
-      background: #fff; color: #111; cursor: pointer; text-decoration: none; display: inline-block;
+      padding: 8px 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      background: #fff;
+      color: #111;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
     }
+
     .badge {
-      display:inline-block; padding:2px 8px; border:1px solid var(--border); border-radius:999px;
-      font-size:12px; text-decoration:none; background:var(--chip);
+      display:inline-block;
+      padding:2px 8px;
+      border:1px solid var(--border);
+      border-radius:999px;
+      font-size:12px;
+      text-decoration:none;
+      background:var(--chip);
     }
+
     .badge:hover { background:#eee; }
 
-    /* NEW: highlight active MeSH chips (same shape, only colors) */
     .badge.active {
       background:#222;
       color:#fff;
       border-color:#222;
     }
 
-    .badge.strong { border-color:#222; background:#eee; 
+    .callout-warn {
+      background: var(--warn);
+      color: #6b4e00;
+      padding: 10px;
+      border-radius: 10px;
+      border:1px solid #f1e2a6;
     }
 
-    .callout-warn { background: var(--warn); color: #6b4e00; padding: 10px; border-radius: 10px; border:1px solid #f1e2a6; }
-    .callout-err  { background: var(--err);  color: #7a0000; padding: 10px; border-radius: 10px; border-radius: 10px; border:1px solid #f3b4b4; }
-    hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
-    input, select { padding: 8px; border:1px solid #ccc; border-radius: 8px; }
-    label { font-size: 12px; color: var(--muted); }
+    .callout-err {
+      background: var(--err);
+      color: #7a0000;
+      padding: 10px;
+      border-radius: 10px;
+      border:1px solid #f3b4b4;
+    }
 
-  .back-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    margin: 0.6rem 0 1.2rem 0;
-    font-size: 0.95rem;
-    color: #555;
-    text-decoration: none;
-    font-style: italic;
-    transition: color 0.15s ease;
-  }
+    hr {
+      border: 0;
+      border-top: 1px solid var(--border);
+      margin: 14px 0;
+    }
 
-  .back-link:hover {
-    color: #111;
-  }
+    input, select {
+      padding: 8px;
+      border:1px solid #ccc;
+      border-radius: 8px;
+    }
 
-  .back-arrow {
-    font-size: 1.25rem;
-    line-height: 1;
-    transition: transform 0.15s ease;
-  }
+    label {
+      font-size: 12px;
+      color: var(--muted);
+    }
 
-  .back-link:hover .back-arrow {
-    transform: translateX(-6px);
-  }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      margin: 0.6rem 0 1.2rem 0;
+      font-size: 0.95rem;
+      color: #555;
+      text-decoration: none;
+      font-style: italic;
+      transition: color 0.15s ease;
+    }
 
-  .back-text {
-    letter-spacing: 0.01em;
-  }
+    .back-link:hover { color: #111; }
 
+    .back-arrow {
+      font-size: 1.25rem;
+      line-height: 1;
+      transition: transform 0.15s ease;
+    }
+
+    .back-link:hover .back-arrow {
+      transform: translateX(-6px);
+    }
+
+    .back-text { letter-spacing: 0.01em; }
   </style>
 </head>
+
 <body>
+
+  {% set active_source = source %}
+  {% if paper is defined and paper and paper.source %}
+    {% set active_source = paper.source %}
+  {% endif %}
 
   <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px;">
     <h1 style="margin:0;">
-      <a href="/" style="text-decoration:none;">LitSearch</a>
+      <a href="/search" style="text-decoration:none;">LitSearch</a>
     </h1>
 
     <div class="muted">
-      {% if source == "europe_pmc" %}
-        Europe PMC-powered literature search
-      {% else %}
+      {% if active_source == "pubmed" %}
         PubMed-powered literature search
+      {% elif active_source == "europe_pmc" %}
+        Europe PMC-powered literature search
+      {% elif active_source == "openalex" %}
+        OpenAlex-powered literature search
+      {% elif active_source == "semantic_scholar" %}
+        Semantic Scholar-powered literature search
+      {% else %}
+        Literature search
       {% endif %}
     </div>
   </div>

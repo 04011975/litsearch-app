@@ -12,3 +12,18 @@ __pycache__/
 # OS / Editor
 .DS_Store
 .vscode/
+
+# Documents
+*.docx
+
+# Local data / exports
+*.csv
+*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+
+# Env
+.env
+.venv/

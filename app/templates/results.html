@@ -3,12 +3,95 @@
 
 <h2 style="margin-top:0;">Search Results</h2>
 
-<form action="/search" method="get" style="margin-bottom: 1rem;">
-  <input name="q" value="{{ q }}" placeholder="Zoekterm" size="50" />
+<style>
+  .ss-disabled {
+    pointer-events: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>
+
+{# Defensive defaults #}
+{% set allow_deep_paging = (allow_deep_paging if allow_deep_paging is defined else false) %}
+{% set epmc_building = (epmc_building if epmc_building is defined else false) %}
+{% set epmc_build_status = (epmc_build_status if epmc_build_status is defined else "") %}
+{% set epmc_built_up_to = (epmc_built_up_to if epmc_built_up_to is defined else 0) %}
+{% set epmc_target_page = (epmc_target_page if epmc_target_page is defined else page) %}
+{% set auto_refresh_seconds = (auto_refresh_seconds if auto_refresh_seconds is defined else 0) %}
+{% set request_failed = (request_failed if request_failed is defined else false) %}
+
+{# Canonical source: prefer URL querystring over backend context #}
+{% set current_source = (request.query_params.get('source') or source or 'pubmed') %}
+{% set ss_mode = (ss_mode if ss_mode is defined else "relevance") %}
+{% set ss_bulk_mode = (current_source == "semantic_scholar" and ss_mode == "bulk") %}
+{% set ss_failed = (current_source == "semantic_scholar" and request_failed) %}
+
+{# Backend-provided URLs (avoid cursor encoding bugs) #}
+{% set epmc_next_url = (epmc_next_url if epmc_next_url is defined else "") %}
+{% set epmc_last_url = (epmc_last_url if epmc_last_url is defined else "") %}
+{% set epmc_export_url_csv = (epmc_export_url_csv if epmc_export_url_csv is defined else "") %}
+{% set epmc_export_url_ris = (epmc_export_url_ris if epmc_export_url_ris is defined else "") %}
+
+{# Generic nav URLs for non-EPMC #}
+{% set next_url = (next_url if next_url is defined else "") %}
+{% set last_url = (last_url if last_url is defined else "") %}
+{% set ss_token = (request.query_params.get('token') or '') %}
+
+{% if source_info %}
+  <div class="source-meta" style="margin: 0.75rem 0 1rem 0;">
+    <h3 style="margin:0 0 0.25rem 0;">{{ source_info.label }}</h3>
+    <p style="margin:0.1rem 0;">
+      <strong>{{ source_info.role }}</strong>
+    </p>
+    <p style="margin:0.1rem 0;">
+      {{ source_info.specialization }}
+    </p>
+    {% if source_info.strengths %}
+      <p style="margin:0.1rem 0;">
+        <strong>Strengths:</strong>
+        {{ source_info.strengths | join(", ") }}
+      </p>
+    {% endif %}
+    {% if source_info.limitations %}
+      <p style="margin:0.1rem 0;">
+        <strong>Limitations:</strong>
+        {{ source_info.limitations | join(", ") }}
+      </p>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% if current_source == "pubmed" %}
+  <div class="muted" style="margin: 0.25rem 0 0.75rem 0;">
+    MeSH-supported search with controlled biomedical indexing.
+  </div>
+{% elif current_source == "europe_pmc" %}
+  <div class="muted" style="margin: 0.25rem 0 0.75rem 0;">
+    Keyword-based search with cursor-based pagination and strong full-text coverage.
+  </div>
+{% elif current_source == "openalex" %}
+  <div class="muted" style="margin: 0.25rem 0 0.75rem 0;">
+    Keyword-based search with concept-based refinement across disciplines.
+  </div>
+
+{% elif current_source == "semantic_scholar" %}
+  <div class="muted" style="margin: 0.25rem 0 0.75rem 0;">
+    Semantic Scholar supports two modes in this interface:
+    <strong>relevance mode</strong> for ranked retrieval with capped export depth, and
+    <strong>chronological mode</strong> for larger exports through bulk/token pagination.
+    MeSH filtering is not available for this source.
+  </div>
+{% endif %}
+
+<form id="search_form" action="/search" method="get" style="margin-bottom: 1rem;">
+  <input name="q" value="{{ q }}" placeholder="Search query" size="50" />
 
   <select name="source">
-    <option value="pubmed" {% if source == "pubmed" %}selected{% endif %}>PubMed</option>
-    <option value="europe_pmc" {% if source == "europe_pmc" %}selected{% endif %}>Europe PMC</option>
+    {% for key, info in source_specializations.items() %}
+      <option value="{{ key }}" {% if current_source == key %}selected{% endif %}>
+        {{ info.label }}
+      </option>
+    {% endfor %}
   </select>
 
   <select name="n">
@@ -17,29 +100,124 @@
     {% endfor %}
   </select>
 
-  <select name="sort">
-    <option value="relevance" {% if sort == "relevance" %}selected{% endif %}>Relevance</option>
-    <option value="year_desc" {% if sort == "year_desc" %}selected{% endif %}>Most recent first</option>
-  </select>
+<select name="sort">
+  {% if current_source == "semantic_scholar" %}
+    <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
+    <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first (chronological mode)</option>
+    <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first (chronological mode)</option>
+  {% else %}
+    <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
+    {% if current_source != "europe_pmc" %}
+      <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first</option>
+    {% endif %}
+    {% if current_source not in ["europe_pmc", "pubmed"] %}
+      <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first</option>
+    {% endif %}
+  {% endif %}
+</select>
 
-  <input name="year_min" value="{{ year_min }}" placeholder="Year (from)" size="10" />
-  <input name="year_max" value="{{ year_max }}" placeholder="Year (to)" size="10" />
+  <input
+    name="year_min"
+    value="{{ year_min }}"
+    placeholder="Year (from)"
+    size="10"
+    {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
+      disabled
+      title="Year filtering is only available in Semantic Scholar chronological mode."
+    {% endif %}
+  />
 
-  <select name="has_abstract">
-    <option value="0" {% if has_abstract == 0 %}selected{% endif %}>Any</option>
-    <option value="1" {% if has_abstract == 1 %}selected{% endif %}>Abstract only</option>
-  </select>
+  <input
+    name="year_max"
+    value="{{ year_max }}"
+    placeholder="Year (to)"
+    size="10"
+    {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
+      disabled
+      title="Year filtering is only available in Semantic Scholar chronological mode."
+    {% endif %}
+  />
 
-  {% if source == "pubmed" %}
-    <!-- Multi-MeSH input: use | or , (we normalize server-side) -->
-    <input name="mesh" value="{{ mesh }}" placeholder="MeSH terms (comma or | separated)" size="26" />
+  {% if current_source != "openalex" %}
+    <select name="has_abstract">
+      <option value="0" {% if has_abstract == 0 %}selected{% endif %}>All records</option>
+      <option value="1" {% if has_abstract == 1 %}selected{% endif %}>Abstract available</option>
+    </select>
   {% endif %}
 
-  <button type="submit" class="btn-primary" style="margin-left: 6px;">Search</button>
+  {% if current_source == "pubmed" %}
+    <input
+      id="mesh_input"
+      name="mesh"
+      value="{{ mesh }}"
+      placeholder="MeSH terms (operator chosen below)"
+      size="26"
+    />
+    <select id="mesh_mode" name="mesh_mode">
+      <option value="or" {% if mesh_mode != 'and' %}selected{% endif %}>MeSH: OR</option>
+      <option value="and" {% if mesh_mode == 'and' %}selected{% endif %}>MeSH: AND</option>
+    </select>
+  {% endif %}
 
-  <!-- Reset: keep same button presence; reset everything including mesh -->
-  <a href="/search?source={{ source }}" class="btn-secondary" style="margin-left: 0.5rem;">Reset filters</a>
+  <button
+    type="submit"
+    class="btn-primary{% if current_source == 'semantic_scholar' %} ss-throttle-btn{% endif %}"
+    style="margin-left: 6px;"
+  >Search</button>
+
+  <a
+    href="/search?source={{ current_source|urlencode }}&q=&page=1&n={{ n }}&sort=relevance&year_min=&year_max=&has_abstract=0{% if current_source == 'pubmed' %}&mesh=&mesh_mode=or{% endif %}"
+    class="btn-secondary"
+    style="margin-left: 0.5rem;"
+  >
+    Reset filters
+  </a>
 </form>
+
+{% if current_source == "semantic_scholar" %}
+  <div id="ss_throttle_status" class="muted" style="margin: 0.5rem 0; display:none;"></div>
+
+  <div class="card" style="margin: 0.75rem 0 1rem 0;">
+    <h3 style="margin:0 0 0.35rem 0;">Semantic Scholar mode</h3>
+
+    {% if ss_bulk_mode %}
+      <div style="margin:0.2rem 0;">
+        <strong>Chronological mode is active.</strong>
+      </div>
+      <div class="muted" style="margin:0.2rem 0;">
+        Larger exports are supported through the bulk/token flow.
+        “Next” is supported, but direct page jumps and “Last” are not available in this mode.
+      </div>
+    {% else %}
+      <div style="margin:0.2rem 0;">
+        <strong>Relevance mode is active.</strong>
+      </div>
+      <div class="muted" style="margin:0.2rem 0;">
+        Export is capped in this mode.
+        For larger exports, switch to chronological mode by choosing a date sort.
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% if current_source == "openalex" and concept_suggestions and concept_suggestions|length > 0 %}
+  <div class="card" style="margin: 1rem 0;">
+    <h3 style="margin:0 0 0.35rem 0;">Refine with Concepts</h3>
+    <div class="muted" style="margin-bottom:0.5rem;">
+      Suggested topics derived from OpenAlex concepts on this page.
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+      {% for item in concept_suggestions %}
+        <a
+          class="badge"
+          href="/search?q={{ (q ~ ' ' ~ item.term)|urlencode }}&source=openalex&page=1&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}"
+        >
+          {{ item.term }} ({{ item.count }})
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
 
 {% if warning %}
   <div class="callout-warn" style="margin: 0.75rem 0;">
@@ -53,99 +231,427 @@
   </div>
 {% endif %}
 
-<div style="margin: 0.75rem 0;">
-  <strong>{{ "{:,}".format(total_count) }}</strong> records — page <strong>{{ page }}</strong> of <strong>{{ total_pages }}</strong>
-</div>
-
-{% if source == "pubmed" %}
-  <div class="muted" style="margin: 0.25rem 0 1rem 0;">
-    Note: PubMed ESearch can paginate only the first 10,000 results for a given query.
+{% if ss_failed %}
+  <div style="margin: 0.75rem 0;">
+    <strong>Semantic Scholar request failed.</strong>
+    Pagination may be temporarily unavailable because the Semantic Scholar API rate limit was reached. Please retry in a few moments or use another source.
+  </div>
+{% else %}
+  <div style="margin: 0.75rem 0;">
+    <strong>{{ "{:,}".format(total_count or 0) }}</strong>
+    records retrieved — page <strong>{{ page }}</strong>
+    {% if total_pages %}
+      of <strong>{{ total_pages }}</strong>
+    {% endif %}
   </div>
 {% endif %}
 
-<div style="display:flex; gap: 0.75rem; align-items:center; margin-bottom: 1rem;">
-  {% if page < total_pages %}
-    <a href="/search?q={{ q | urlencode }}&source={{ source }}&page={{ page+1 }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh | urlencode }}{% endif %}">Next</a>
+{% if current_source == "pubmed" %}
+  <div class="muted" style="margin: 0.25rem 0 1rem 0;">
+    Note: PubMed ESearch permits pagination of up to 10,000 results per query.
+  </div>
+{% endif %}
+
+{% if current_source == "pubmed" and mesh_suggestions and mesh_suggestions|length > 0 %}
+  <div class="card" style="margin: 1rem 0;">
+    <h3 style="margin:0 0 0.35rem 0;">Refine with MeSH</h3>
+    <div class="muted" style="margin-bottom:0.5rem;">
+      Suggested terms derived from MeSH headings on this page.
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+      {% for item in mesh_suggestions %}
+        <button
+          type="button"
+          class="badge mesh-chip"
+          data-term="{{ item.term }}"
+          style="cursor:pointer; border:1px solid #ccc; background:#fff;"
+        >
+          {{ item.term }} ({{ item.count }})
+        </button>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+{% if current_source == "europe_pmc" %}
+  <div class="muted" style="margin: 0.25rem 0 1rem 0;">
+    Europe PMC implements <strong>cursor-based pagination</strong>.
+    <br/>
+    {% if allow_deep_paging %}
+      “Go to page” and “Last” are supported via server-side cursor caching (Redis).
+      The first jump to a deep page may take a moment (cursor chain build).
+    {% else %}
+      Only sequential navigation (“Next”) is supported.
+      Direct page jumps and “Last” require Redis cursor caching.
+    {% endif %}
+  </div>
+{% elif not allow_deep_paging %}
+  <div class="muted" style="margin: 0.25rem 0 1rem 0;">
+    For performance considerations, results are limited to the first {{ total_pages }} pages.
+  </div>
+{% endif %}
+
+{% if not ss_failed %}
+<div style="display:flex; gap: 0.75rem; align-items:center; margin-bottom: 0.75rem; flex-wrap:wrap;">
+
+  {# NEXT #}
+  {% if current_source == "europe_pmc" %}
+    {% if epmc_next_url %}
+      <a href="{{ epmc_next_url }}">Next</a>
+    {% else %}
+      <span class="muted" title="No next cursor was returned by Europe PMC for this query/page.">Next</span>
+    {% endif %}
+  {% else %}
+    {% if next_url %}
+      <a href="{{ next_url }}" {% if current_source == "semantic_scholar" %}class="ss-throttle-link"{% endif %}>Next</a>
+    {% elif total_pages and page < total_pages %}
+      <a
+        href="/search?q={{ q|urlencode }}&source={{ current_source|urlencode }}&page={{ page + 1 }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source == 'semantic_scholar' and ss_token %}&token={{ ss_token|urlencode }}{% endif %}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}"
+        {% if current_source == "semantic_scholar" %}class="ss-throttle-link"{% endif %}
+      >Next</a>
+    {% else %}
+      <span class="muted">Next</span>
+    {% endif %}
   {% endif %}
 
-  <a href="/search?q={{ q | urlencode }}&source={{ source }}&page={{ total_pages }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh | urlencode }}{% endif %}">Last</a>
+  {# LAST #}
+  {% if total_pages and total_pages > 1 %}
+    {% if current_source == "europe_pmc" %}
+      {% if allow_deep_paging and epmc_last_url %}
+        <a href="{{ epmc_last_url }}">Last</a>
+      {% else %}
+        <span class="muted" title="Europe PMC uses cursor-based pagination; 'Last' requires a built cursor chain.">Last</span>
+      {% endif %}
+    {% elif current_source == "semantic_scholar" %}
+      <span class="muted" title="Direct jump to the last page is unavailable for Semantic Scholar. Relevance mode is capped, and chronological mode uses token-based pagination.">Last</span>
+    {% else %}
+      {% if last_url %}
+        <a href="{{ last_url }}">Last</a>
+      {% else %}
+        <a
+          href="/search?q={{ q|urlencode }}&source={{ current_source|urlencode }}&page={{ total_pages }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}"
+        >Last</a>
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <span class="muted">Last</span>
+  {% endif %}
 
-  <form action="/search" method="get" style="display:inline;">
+  {# GO TO PAGE #}
+  {% set goto_disabled = (current_source == "europe_pmc" and not allow_deep_paging) or ss_bulk_mode %}
+  <form id="goto_form" action="/search" method="get" style="display:inline;">
     <input type="hidden" name="q" value="{{ q }}">
-    <input type="hidden" name="source" value="{{ source }}">
+    <input type="hidden" name="source" value="{{ current_source }}">
     <input type="hidden" name="n" value="{{ n }}">
     <input type="hidden" name="sort" value="{{ sort }}">
-    <input type="hidden" name="year_min" value="{{ year_min }}">
-    <input type="hidden" name="year_max" value="{{ year_max }}">
-    <input type="hidden" name="has_abstract" value="{{ has_abstract }}">
-    {% if source == "pubmed" %}
-      <input type="hidden" name="mesh" value="{{ mesh }}">
+
+    {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
+      <input type="hidden" name="year_min" value="">
+      <input type="hidden" name="year_max" value="">
+    {% else %}
+      <input type="hidden" name="year_min" value="{{ year_min }}">
+      <input type="hidden" name="year_max" value="{{ year_max }}">
     {% endif %}
 
-    Go to page
-    <input name="page" value="{{ page }}" size="4">
-    <button type="submit">Go</button>
+    {% if current_source == "semantic_scholar" and ss_token %}
+      <input type="hidden" name="token" value="{{ ss_token }}">
+    {% endif %}
+
+    <input type="hidden" name="has_abstract" value="{{ has_abstract }}">
+
+    {% if current_source == "pubmed" %}
+      <input type="hidden" name="mesh" value="{{ mesh }}">
+      <input type="hidden" name="mesh_mode" value="{{ mesh_mode or 'or' }}">
+    {% endif %}
+
+    <label for="goto_page_input" style="cursor: help;"
+      {% if current_source == "europe_pmc" and allow_deep_paging %}
+        title="Europe PMC uses cursor-based pagination; the server derives cursors from Redis to support direct page navigation."
+      {% elif current_source == "europe_pmc" %}
+        title="Europe PMC uses cursor-based pagination; direct page navigation is not available without server-side cursor caching."
+      {% elif current_source == "semantic_scholar" %}
+        title="Direct page navigation is unavailable for Semantic Scholar. Relevance mode is capped, and chronological mode uses token-based pagination."
+      {% else %}
+        title="Navigate directly to a specified results page."
+      {% endif %}
+    >Go to page</label>
+
+    <input
+      id="goto_page_input"
+      type="number"
+      name="page"
+      value="{{ page }}"
+      min="1"
+      {% if total_pages %}max="{{ total_pages }}"{% endif %}
+      style="width: 5rem;"
+      {% if goto_disabled %}disabled{% endif %}
+      inputmode="numeric"
+    >
+
+    <button
+      type="submit"
+      {% if current_source == 'semantic_scholar' %}class="ss-throttle-btn"{% endif %}
+      {% if goto_disabled %}
+        disabled
+        title="{% if current_source == 'semantic_scholar' %}Direct page navigation is unavailable for Semantic Scholar in this interface.{% else %}Direct page navigation is not supported for Europe PMC without Redis cursor caching.{% endif %}"
+      {% endif %}
+    >Go</button>
   </form>
 
-  <div style="margin-left:auto;">
-    Export:
-    <a href="/export/csv?q={{ q|urlencode }}&source={{ source }}&page={{ page }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh }}{% endif %}">CSV (this page)</a>
-    |
-    <a href="/export/ris?q={{ q|urlencode }}&source={{ source }}&page={{ page }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}{% if source=='pubmed' %}&mesh={{ mesh }}{% endif %}">RIS (this page)</a>
-
-    {% if source == "pubmed" %}
-      |
-      <a href="/export/csv?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}&mesh={{ mesh }}">CSV (first {{ bulk_limit }})</a>
-      |
-      <a href="/export/ris?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}&n={{ n }}&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}&mesh={{ mesh }}">RIS (first {{ bulk_limit }})</a>
-    {% else %}
-      |
-      <a href="/export/csv?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}">CSV (first {{ bulk_limit }})</a>
-      |
-      <a href="/export/ris?q={{ q|urlencode }}&source={{ source }}&scope=bulk&bulk_limit={{ bulk_limit }}">RIS (first {{ bulk_limit }})</a>
-    {% endif %}
-  </div>
-</div>
-
-<hr/>
-
-{% if source == "pubmed" and mesh_suggestions and mesh_suggestions|length > 0 %}
-  {# Multi-MeSH state (server normalized as "Term1|Term2|...") #}
-  {% set active_mesh = (mesh or "").split("|") if mesh else [] %}
-
-  <div class="card" style="margin: 0.75rem 0;">
-    <div style="font-weight:600; margin-bottom:8px;">Refine with MeSH</div>
-
-    {% for item in mesh_suggestions %}
-      {% set term = item.term %}
-      {% set is_active = term in active_mesh %}
-
-      {# Toggle term in/out of active_mesh #}
-      {% if is_active %}
-        {% set next_list = active_mesh | reject("equalto", term) | list %}
-      {% else %}
-        {% set next_list = active_mesh + [term] %}
-      {% endif %}
-      {% set next_mesh = next_list | join("|") %}
-
-      <a
-        class="badge {% if is_active %}active{% endif %}"
-        href="/search?q={{ q | urlencode }}&source={{ source }}&n={{ n }}&page=1&sort={{ sort }}&year_min={{ year_min }}&year_max={{ year_max }}&has_abstract={{ has_abstract }}&mesh={{ next_mesh | urlencode }}"
-        title="{% if is_active %}Remove{% else %}Add{% endif %} MeSH: {{ term }}"
-        style="margin: 4px 6px 0 0;"
-      >
-        {{ term }} ({{ item.count }})
-      </a>
-    {% endfor %}
-
-    {% if mesh %}
-      <div class="muted" style="margin-top:10px;">
-        Active MeSH: <strong>{{ mesh }}</strong>
-        (click a highlighted chip to remove)
+  {# EXPORT #}
+  <div style="margin-left:auto; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+    {% if current_source == "semantic_scholar" %}
+      <div class="muted" style="margin-right: 0.5rem;">
+        {% if ss_bulk_mode %}
+          Chronological mode = larger export via bulk/token flow.
+        {% else %}
+          Relevance mode = capped export.
+        {% endif %}
       </div>
     {% endif %}
+
+    <span><strong>Export</strong></span>
+
+    {% if current_source == "europe_pmc" %}
+      {% if epmc_export_url_csv and epmc_export_url_ris %}
+        <a href="{{ epmc_export_url_csv }}">CSV (current page)</a>
+        |
+        <a href="{{ epmc_export_url_ris }}">RIS (current page)</a>
+      {% else %}
+        {% set cursor_in_url = (request.query_params.get('cursor') or '') %}
+        <a href="/export/csv?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}{% if cursor_in_url %}&cursor={{ cursor_in_url|urlencode }}{% endif %}">CSV (current page)</a>
+        |
+        <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}{% if cursor_in_url %}&cursor={{ cursor_in_url|urlencode }}{% endif %}">RIS (current page)</a>
+      {% endif %}
+    {% else %}
+      {% if current_source == "semantic_scholar" and ss_bulk_mode %}
+        <a href="/export/csv?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}{% if ss_token %}&token={{ ss_token|urlencode }}{% endif %}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}">CSV (current page)</a>
+        |
+        <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}{% if ss_token %}&token={{ ss_token|urlencode }}{% endif %}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}">RIS (current page)</a>
+      {% else %}
+        <a href="/export/csv?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">CSV (current page)</a>
+        |
+        <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">RIS (current page)</a>
+      {% endif %}
+    {% endif %}
+
+    <span style="margin:0 0.25rem;">|</span>
+
+    <select id="export_limit">
+      <option value="100">First 100</option>
+      <option value="500">First 500</option>
+      <option value="1000" selected>First 1000</option>
+      {% if current_source != "semantic_scholar" or ss_bulk_mode %}
+        <option value="2000">First 2000</option>
+      {% endif %}
+    </select>
+
+    <select id="export_fmt">
+      <option value="csv">CSV</option>
+      <option value="ris">RIS</option>
+      <option value="xlsx">Excel (.xlsx)</option>
+    </select>
+
+    <button type="button" id="export_start_btn">Start export job</button>
+    <span id="export_status" class="muted"></span>
   </div>
+</div>
 {% endif %}
+
+<script>
+(function () {
+  const btn = document.getElementById("export_start_btn");
+  const statusEl = document.getElementById("export_status");
+  const limitEl = document.getElementById("export_limit");
+  const fmtEl = document.getElementById("export_fmt");
+
+  if (!btn || !statusEl || !limitEl || !fmtEl) {
+    return;
+  }
+
+  function setStatus(msg) {
+    statusEl.textContent = msg || "";
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  function buildParams() {
+    const params = new URLSearchParams();
+
+    params.set("q", "{{ q }}");
+    params.set("source", "{{ current_source }}");
+    params.set("n", "{{ n }}");
+    params.set("sort", "{{ sort }}");
+    params.set("fmt", fmtEl.value);
+    params.set("limit", limitEl.value);
+    params.set("year_min", "{{ year_min }}");
+    params.set("year_max", "{{ year_max }}");
+    params.set("has_abstract", "{{ has_abstract }}");
+
+    {% if current_source == "pubmed" %}
+    params.set("mesh", "{{ mesh }}");
+    params.set("mesh_mode", "{{ mesh_mode or 'or' }}");
+    {% endif %}
+
+    {% if current_source == "semantic_scholar" and ss_token %}
+    params.set("token", "{{ ss_token }}");
+    {% endif %}
+
+    return params;
+  }
+
+  async function pollJob(statusUrl, fallbackDownloadUrl) {
+    for (let i = 0; i < 120; i++) {
+      const res = await fetch(statusUrl, { cache: "no-store" });
+      if (!res.ok) {
+        throw new Error("Could not read export job status");
+      }
+
+      const data = await res.json();
+      const status = data.status || "";
+      const message = data.message || "";
+      const collected = Number(data.collected || 0);
+      const limit = Number(data.limit || 0);
+      const progressPct = Number(data.progress_pct || 0);
+
+      if (status === "queued") {
+        setStatus(message || "Queued for export");
+        await sleep(1500);
+        continue;
+      }
+
+      if (status === "running") {
+        if (limit > 0) {
+          setStatus((message || "Export running") + " — " + collected + "/" + limit + " (" + progressPct + "%)");
+        } else {
+          setStatus((message || "Export running") + " — " + collected);
+        }
+        await sleep(1500);
+        continue;
+      }
+
+      if (status === "done") {
+        setStatus(data.message || "Export ready (100%)");
+        const finalDownloadUrl = data.download_url || fallbackDownloadUrl;
+        if (!finalDownloadUrl) {
+          throw new Error("Download URL missing");
+        }
+        await sleep(800);
+        window.location.href = finalDownloadUrl;
+        return;
+      }
+
+      if (status === "failed") {
+        throw new Error(data.last_error || message || "Export job failed");
+      }
+
+      await sleep(1500);
+    }
+
+    throw new Error("Export timed out");
+  }
+
+  btn.addEventListener("click", async function () {
+    btn.disabled = true;
+    setStatus("Starting export job...");
+
+    try {
+      const res = await fetch("/export/job?" + buildParams().toString(), {
+        method: "POST",
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Could not start export job");
+      }
+
+      const data = await res.json();
+
+      if (!data.status_url) {
+        throw new Error("Export job response incomplete: missing status_url");
+      }
+
+      await pollJob(data.status_url, data.download_url || "");
+    } catch (err) {
+      setStatus("Export failed: " + (err && err.message ? err.message : String(err)));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+
+<script>
+(function () {
+  const meshInput = document.getElementById("mesh_input");
+  const meshMode = document.getElementById("mesh_mode");
+  const chips = document.querySelectorAll(".mesh-chip");
+  if (!meshInput || !chips.length) return;
+
+  function currentSeparator() {
+    return (meshMode && meshMode.value === "and") ? ", " : " | ";
+  }
+
+  function parseMesh(value) {
+    return value
+      .split(/[|,]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  function syncChipState() {
+    const selected = new Set(parseMesh(meshInput.value).map(v => v.toLowerCase()));
+    chips.forEach(chip => {
+      const term = (chip.dataset.term || "").trim();
+      const active = selected.has(term.toLowerCase());
+      chip.setAttribute("aria-pressed", active ? "true" : "false");
+      chip.style.background = active ? "#222" : "#fff";
+      chip.style.color = active ? "#fff" : "#222";
+      chip.style.borderColor = active ? "#222" : "#ccc";
+    });
+  }
+
+  function rewriteWithMode() {
+    const terms = parseMesh(meshInput.value);
+    meshInput.value = terms.join(currentSeparator());
+    syncChipState();
+  }
+
+  chips.forEach(chip => {
+    chip.addEventListener("click", function () {
+      const term = (this.dataset.term || "").trim();
+      if (!term) return;
+
+      let terms = parseMesh(meshInput.value);
+      const lower = terms.map(t => t.toLowerCase());
+      const idx = lower.indexOf(term.toLowerCase());
+
+      if (idx >= 0) {
+        terms.splice(idx, 1);
+      } else {
+        terms.push(term);
+      }
+
+      meshInput.value = terms.join(currentSeparator());
+      syncChipState();
+    });
+  });
+
+  if (meshMode) {
+    meshMode.addEventListener("change", rewriteWithMode);
+  }
+
+  meshInput.addEventListener("input", syncChipState);
+  syncChipState();
+})();
+</script>
+
+<hr/>
 
 {% if papers and papers|length > 0 %}
   {% for p in papers %}
@@ -153,8 +659,8 @@
       <h3 style="margin:0 0 0.5rem 0;">{{ p.title }}</h3>
 
       <div style="color:#555; margin-bottom:0.35rem;">
-        <strong>ID:</strong> {{ p.pmid }}
-        {% if p.year %} | <strong>Year:</strong> {{ p.year }}{% endif %}
+        <strong>ID:</strong> {{ p.id or p.pmid }}
+        {% if p.publication_date or p.year %} | <strong>Year:</strong> {{ p.publication_date or p.year }}{% endif %}
         {% if p.journal %} | <strong>Journal:</strong> {{ p.journal }}{% endif %}
         {% if p.doi %} | <strong>DOI:</strong> {{ p.doi }}{% endif %}
       </div>
@@ -165,43 +671,66 @@
         </div>
       {% endif %}
 
+      {% set src = p.source %}
+      {% if src == "pubmed" %}
+        {% set open_label = "Open in PubMed" %}
+      {% elif src == "europe_pmc" %}
+        {% set open_label = "Open in Europe PMC" %}
+      {% elif src == "openalex" %}
+        {% set open_label = "Open in OpenAlex" %}
+      {% elif src == "semantic_scholar" %}
+        {% set open_label = "Open in Semantic Scholar" %}
+      {% else %}
+        {% set open_label = "Open in source database" %}
+      {% endif %}
+
       <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-        {% if source == "pubmed" %}
-          <a href="/paper/{{ p.pmid }}">View details</a>
-          <a href="https://pubmed.ncbi.nlm.nih.gov/{{ p.pmid }}/" target="_blank" rel="noopener">Open in PubMed</a>
+        {% set detail_href = p.detail_url if p.detail_url else ('/paper/' ~ (p.source or source) ~ '/' ~ (p.id or p.pmid)) %}
+        <a href="{{ detail_href }}">View details</a>
 
-          {# ✅ Publisher link for PubMed when DOI exists #}
-          {% if p.doi %}
-            <a href="https://doi.org/{{ p.doi | urlencode }}" target="_blank" rel="noopener">Publisher (DOI)</a>
-          {% endif %}
+        {% if p.external_url %}
+          <a href="{{ p.external_url }}" target="_blank" rel="noopener">{{ open_label }}</a>
+        {% elif p.url %}
+          <a href="{{ p.url }}" target="_blank" rel="noopener">{{ open_label }}</a>
+        {% endif %}
 
-        {% else %}
-          <a href="/paper/europe_pmc/{{ p.pmid }}">View details</a>
+        {% if p.publisher_url %}
+          <a href="{{ p.publisher_url }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+        {% elif p.doi %}
+          <a href="https://doi.org/{{ p.doi|urlencode }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+        {% endif %}
 
-          {% if p.publisher_url %}
-            <a href="{{ p.publisher_url }}" target="_blank" rel="noopener">Publisher (DOI)</a>
-          {% endif %}
-
-          {% if p.full_text_url %}
-            <a class="badge" href="{{ p.full_text_url }}" target="_blank" rel="noopener">{{ p.full_text_label }}</a>
-          {% endif %}
-
-          {% if p.url %}
-            <a href="{{ p.url }}" target="_blank" rel="noopener">Open in Europe PMC</a>
-          {% endif %}
+        {% if p.full_text_url %}
+          <a class="badge" href="{{ p.full_text_url }}" target="_blank" rel="noopener">
+            {{ p.full_text_label }}
+          </a>
         {% endif %}
       </div>
 
       {% if p.abstract %}
         <details style="margin-top: 0.75rem;">
-          <summary>Show abstract</summary>
+          <summary>View abstract</summary>
           <div style="margin-top: 0.5rem; color:#333;">{{ p.abstract }}</div>
         </details>
       {% endif %}
     </div>
   {% endfor %}
 {% else %}
-  <p>No results.</p>
+  {% if not ss_failed %}
+    <p>No records retrieved.</p>
+  {% endif %}
+{% endif %}
+
+{% if current_source == "europe_pmc" and epmc_building %}
+  <div class="callout-warn" style="margin: 0.75rem 0;">
+    <strong>Constructing cursor chain for deep paging.</strong>
+    Status: <code>{{ epmc_build_status }}</code>.
+    Progress: page <strong>{{ epmc_built_up_to }}</strong> of <strong>{{ epmc_target_page }}</strong>.
+    This page may refresh automatically.
+  </div>
+  {% if auto_refresh_seconds and auto_refresh_seconds > 0 %}
+    <meta http-equiv="refresh" content="{{ auto_refresh_seconds }}">
+  {% endif %}
 {% endif %}
 
 {% endblock %}

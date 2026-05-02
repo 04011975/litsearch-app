@@ -3,8 +3,7 @@
 
 <h2 style="margin-top:0;">Article Details</h2>
 
-<a href="{{ request.headers.get('referer', '/search') }}"
-   class="back-link">
+<a href="{{ request.headers.get('referer', '/search') }}" class="back-link">
   <span class="back-arrow">←</span>
   <span class="back-text">Back to results</span>
 </a>
@@ -20,7 +19,7 @@
     <h3 style="margin:0 0 0.5rem 0;">{{ paper.title }}</h3>
 
     <div style="color:#555; margin-bottom:0.35rem;">
-      <strong>ID:</strong> {{ paper.pmid }}
+      <strong>ID:</strong> {{ paper.id or paper.pmid }}
       {% if paper.year %} | <strong>Year:</strong> {{ paper.year }}{% endif %}
       {% if paper.journal %} | <strong>Journal:</strong> {{ paper.journal }}{% endif %}
       {% if paper.doi %} | <strong>DOI:</strong> {{ paper.doi }}{% endif %}
@@ -32,31 +31,52 @@
       </div>
     {% endif %}
 
+    {# Label helper #}
+    {% set src = paper.source if paper.source else source %}
+    {% if src == "pubmed" %}
+      {% set open_label = "Open in PubMed" %}
+    {% elif src == "europe_pmc" %}
+      {% set open_label = "Open in Europe PMC" %}
+    {% elif src == "openalex" %}
+      {% set open_label = "Open in OpenAlex" %}
+    {% elif src == "semantic_scholar" %}
+      {% set open_label = "Open in Semantic Scholar" %}
+    {% else %}
+      {% set open_label = "Open source" %}
+    {% endif %}
+
     <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-top:0.25rem;">
-      {# Publisher link: werkt voor PubMed én Europe PMC zodra DOI aanwezig is #}
-      {% if paper.doi %}
-        <a href="https://doi.org/{{ paper.doi }}" target="_blank" rel="noopener">Publisher (DOI)</a>
-      {% elif paper.publisher_url %}
+      {# ✅ Publisher link: prefer server-built publisher_url #}
+      {% if paper.publisher_url %}
         <a href="{{ paper.publisher_url }}" target="_blank" rel="noopener">Publisher (DOI)</a>
+      {% elif paper.doi %}
+        {# fallback if publisher_url missing; assumes doi is normalized #}
+        <a href="https://doi.org/{{ paper.doi }}" target="_blank" rel="noopener">Publisher (DOI)</a>
       {% endif %}
 
+      {# ✅ Full text badge (mainly Europe PMC) #}
       {% if paper.full_text_url %}
         <a class="badge" href="{{ paper.full_text_url }}" target="_blank" rel="noopener">
           {{ paper.full_text_label }}
         </a>
       {% endif %}
 
-      {# Open-in link: NIET via paper.url voor PubMed, maar altijd via PMID #}
-      {% if source == "pubmed" %}
-        <a href="https://pubmed.ncbi.nlm.nih.gov/{{ paper.pmid }}/" target="_blank" rel="noopener">Open in PubMed</a>
+      {# ✅ Open-in link: prefer external_url then url then fallback #}
+    {% if paper.external_url %}
+      <a href="{{ paper.external_url }}" target="_blank" rel="noopener">{{ open_label }}</a>
+    {% elif paper.url %}
+      <a href="{{ paper.url }}" target="_blank" rel="noopener">{{ open_label }}</a>
+    {% else %}
+      {% if src == "pubmed" %}
+        <a href="https://pubmed.ncbi.nlm.nih.gov/{{ paper.id or paper.pmid }}/" target="_blank" rel="noopener">{{ open_label }}</a>
+      {% elif src == "europe_pmc" %}
+        <a href="https://europepmc.org/search?query={{ paper.id or paper.pmid }}" target="_blank" rel="noopener">{{ open_label }}</a>
+      {% elif src == "semantic_scholar" %}
+        <a href="https://www.semanticscholar.org/paper/{{ paper.id or paper.pmid }}" target="_blank" rel="noopener">{{ open_label }}</a>
       {% else %}
-        {% if paper.url %}
-          <a href="{{ paper.url }}" target="_blank" rel="noopener">Open in Europe PMC</a>
-        {% else %}
-          <a href="https://europepmc.org/search?query={{ paper.pmid | urlencode }}" target="_blank" rel="noopener">Open in Europe PMC</a>
-        {% endif %}
+        <span class="muted">No external link available</span>
       {% endif %}
-    </div>
+    {% endif %}
 
     {% if paper.abstract %}
       <hr/>

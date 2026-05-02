@@ -1,9 +1,109 @@
 services:
-  litsearch:
-    build: .
-    container_name: litsearch
+  redis:
+    image: redis:7-alpine
+    container_name: litsearch-redis
     ports:
-      - "8001:8001"
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  litsearch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: litsearch
     env_file:
       - .env
+    environment:
+      TOOL_NAME: LitSearch
+      CONTACT_EMAIL: ${CONTACT_EMAIL}
+      NCBI_API_KEY: ${NCBI_API_KEY}
+      LOG_LEVEL: INFO
+      REDIS_URL: redis://redis:6379/0
+      EUROPE_PMC_MAX_PAGES: "200"
+      EUROPE_PMC_CURSOR_TTL_SECONDS: "86400"
+      EXPORT_DIR: /app/exports
+      EXPORT_HARD_CAP: "2000"
+      BULK_EXPORT_DEFAULT: "500"
+    ports:
+      - "8001:8001"
+    volumes:
+      - exports:/app/exports
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=2).read(); print('ok')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  arq-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: litsearch-arq-worker
+    env_file:
+      - .env
+    command: >
+      sh -c "python -m arq app.jobs.arq_worker.WorkerSettings"
+    environment:
+      TOOL_NAME: LitSearch
+      CONTACT_EMAIL: ${CONTACT_EMAIL}
+      NCBI_API_KEY: ${NCBI_API_KEY}
+      REDIS_URL: redis://redis:6379/0
+      ARQ_REDIS_URL: redis://redis:6379/0
+      EUROPE_PMC_MAX_PAGES: "200"
+      EUROPE_PMC_CURSOR_TTL_SECONDS: "86400"
+      EXPORT_DIR: /app/exports
+      EXPORT_HARD_CAP: "2000"
+      BULK_EXPORT_DEFAULT: "500"
+      ARQ_MAX_JOBS: "6"
+      ARQ_JOB_TIMEOUT: "900"
+    volumes:
+      - exports:/app/exports
+    depends_on:
+      redis:
+        condition: service_healthy
+      litsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sanity-check:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      sh -c "pip install -r requirements-dev.txt &&
+             python /app/scripts/sanity_check.py"
+    environment:
+      LITSEARCH_BASE_URL: http://litsearch:8001
+      SANITY_REDIS_HOST: redis
+      SANITY_REDIS_PORT: "6379"
+      REDIS_URL: redis://redis:6379/0
+      SANITY_BULK_LIMIT: "500"
+    volumes:
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      litsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  exports:
+  redisdata:
