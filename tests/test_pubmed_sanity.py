@@ -1,6 +1,5 @@
 from app.connectors.pubmed import build_pubmed_term, pubmed_fetch_details, pubmed_search_page
 
-
 import pytest
 
 
@@ -33,6 +32,7 @@ async def test_pubmed_build_term_with_mesh_and():
     assert '"Humans"[MeSH Terms] AND "Adolescent"[MeSH Terms]' in term
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_pubmed_search_returns_results():
     res = await pubmed_search_page(
@@ -46,6 +46,7 @@ async def test_pubmed_search_returns_results():
     assert len(res.pmids) > 0
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_pubmed_search_date_desc_returns_results():
     res = await pubmed_search_page(
@@ -79,6 +80,7 @@ async def test_pubmed_fetch_details_has_expected_fields():
         assert p.source == "pubmed"
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_pubmed_has_abstract_filter_is_respected():
     res = await pubmed_search_page(
@@ -112,6 +114,8 @@ async def test_pubmed_mesh_and_vs_or_changes_query():
     assert " OR " in term_or
     assert " AND " in term_and
 
+
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_pubmed_year_range_semantics():
     res = await pubmed_search_page(
@@ -132,6 +136,8 @@ async def test_pubmed_year_range_semantics():
     # sanity check: meerderheid of minstens duidelijke overlap
     assert len(in_range) >= max(1, len(years) // 2)
 
+
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_pubmed_date_desc_is_recent_firstish():
     res = await pubmed_search_page(

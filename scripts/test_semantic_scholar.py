@@ -1,3 +1,6 @@
+import pytest
+
+@pytest.mark.integration
 def test_semantic_scholar_connector():
     from app.connectors.semantic_scholar import search_semantic_scholar
 
