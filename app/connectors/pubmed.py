@@ -207,20 +207,67 @@ async def _get_json(url: str, params: dict[str, Any], timeout: float = 30.0) -> 
         "User-Agent": PUBMED_USER_AGENT,
         "Accept": "application/json,text/plain,*/*",
     }
+
+    max_retries = int(os.getenv("PUBMED_JSON_MAX_RETRIES", "4"))
+    last_err: Exception | None = None
+
     async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.get(url, params=params, headers=headers)
-        r.raise_for_status()
-        try:
-            return _safe_json_loads(r.text or "")
-        except Exception as e:
-            snippet = (r.text or "")[:600].replace("\n", " ").replace("\r", " ")
-            logger.exception(
-                "pubmed_json_parse_failed url=%s params=%r err=%s snippet=%r",
-                url, params, e, snippet
-            )
-            raise RuntimeError(
-                f"Could not parse NCBI response as JSON: {e}. Response starts: {snippet}"
-            )
+        for attempt in range(max_retries):
+            try:
+                r = await client.get(url, params=params, headers=headers)
+
+                if r.status_code in (429, 500, 502, 503, 504):
+                    raise httpx.HTTPStatusError(
+                        f"Temporary HTTP {r.status_code}",
+                        request=r.request,
+                        response=r,
+                    )
+
+                r.raise_for_status()
+
+                try:
+                    return _safe_json_loads(r.text or "")
+                except Exception as e:
+                    snippet = (r.text or "")[:600].replace("\n", " ").replace("\r", " ")
+                    logger.exception(
+                        "pubmed_json_parse_failed url=%s params=%r err=%s snippet=%r",
+                        url,
+                        params,
+                        e,
+                        snippet,
+                    )
+                    raise RuntimeError(
+                        f"Could not parse NCBI response as JSON: {e}. Response starts: {snippet}"
+                    )
+
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as e:
+                last_err = e
+
+                if attempt >= max_retries - 1:
+                    break
+
+                response = getattr(e, "response", None)
+                retry_after = response.headers.get("Retry-After") if response is not None else None
+
+                try:
+                    wait_s = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                except ValueError:
+                    wait_s = 0.5 * (2 ** attempt)
+
+                jitter = random.uniform(0.0, 0.25)
+
+                logger.warning(
+                    "pubmed_json_retry attempt=%s max_retries=%s wait_s=%.2f url=%s status=%s",
+                    attempt + 1,
+                    max_retries,
+                    wait_s + jitter,
+                    url,
+                    getattr(response, "status_code", None),
+                )
+
+                await asyncio.sleep(wait_s + jitter)
+
+    raise RuntimeError(f"PubMed JSON request failed after {max_retries} retries: {last_err}")
         
 def _extract_pubdate_text(article: ET.Element) -> str:
     def fmt_date(node: ET.Element | None) -> str:
