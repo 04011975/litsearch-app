@@ -49,6 +49,8 @@ from app.redis_client import make_redis
 from app.services.redis_policy import cache_get_json, cache_set_json, make_cache_key, rate_limit_sliding_window
 from app.specializations import get_source_info
 
+from app.core.deduplication import deduplicate_papers
+
 
 # =========================================================
 # Small helpers
@@ -228,6 +230,22 @@ SOURCE_SPECIALIZATIONS = {
         "limitations": [
             "no MeSH indexing",
             "metadata heterogeneity",
+        ],
+    },
+
+        "all": {
+        "label": "All sources",
+        "role": "Multi-source literature retrieval",
+        "specialization": "Combined export across PubMed, Europe PMC, OpenAlex, and Semantic Scholar.",
+        "search_mode": "Multi-source export mode. Browser search results are not combined yet.",
+        "strengths": [
+            "broader coverage across multiple scholarly databases",
+            "cross-source deduplication during export",
+            "single export workflow",
+        ],
+        "limitations": [
+            "currently available for async export only",
+            "browser result listing is not yet combined",
         ],
     },
 }
@@ -1067,6 +1085,127 @@ async def search(
     openalex_sort = _openalex_sort(ui_sort)
     ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
     epmc_sort = ui_sort
+
+
+
+    # --------------------------
+    # All Sources
+    # --------------------------
+    if source == "all":
+        combined_raw: list[Paper] = []
+
+        # PubMed (eerste pagina)
+        try:
+            term = build_pubmed_term(
+                q,
+                year_min=year_min_i,
+                year_max=year_max_i,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
+
+            if term:
+                res = await pubmed_search_page(
+                    term,
+                    max_results=n,
+                    retstart=0,
+                    sort=pubmed_sort,
+                    api_key=NCBI_API_KEY,
+                    tool=TOOL_NAME,
+                    email=CONTACT_EMAIL,
+                )
+                fetched = await pubmed_fetch_details(
+                    res.pmids,
+                    api_key=NCBI_API_KEY,
+                    tool=TOOL_NAME,
+                    email=CONTACT_EMAIL,
+                )
+                combined_raw.extend(fetched or [])
+
+        except Exception:
+            logger.exception("ALL: pubmed failed")
+
+        # OpenAlex
+        try:
+            oa_papers, _ = await _run_sync(
+                openalex_search,
+                q,
+                page=1,
+                n=n,
+                sort=openalex_sort,
+                year_min=year_min_i,
+                year_max=year_max_i,
+            )
+            combined_raw.extend(oa_papers or [])
+
+        except Exception:
+            logger.exception("ALL: openalex failed")
+
+        # Europe PMC
+        try:
+            ep_papers, _total, _ = await _europe_pmc_search_compat_async(
+                q,
+                n=n,
+                cursor="*",
+                sort=ui_sort,
+                year_min=year_min_i,
+                year_max=year_max_i,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
+            combined_raw.extend(ep_papers or [])
+
+        except Exception:
+            logger.exception("ALL: epmc failed")
+
+        # Semantic Scholar
+        try:
+            ss_papers, _ = await _run_sync(
+                search_semantic_scholar,
+                q,
+                page=1,
+                n=n,
+            )
+            combined_raw.extend(ss_papers or [])
+
+        except Exception:
+            logger.exception("ALL: semantic scholar failed")
+
+        records_before_dedup = len(combined_raw)
+        deduped_raw, duplicates_removed = deduplicate_papers(combined_raw)
+
+        combined_papers = [
+            _paper_to_dict(p, source=getattr(p, "source", "") or "unknown")
+            for p in deduped_raw
+        ]
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="all",
+            n=n,
+            page=1,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx.update({
+            "papers": combined_papers,
+            "mesh_suggestions": [],
+            "concept_suggestions": [],
+            "total_count": len(combined_papers),
+            "total_pages": 1,
+            "error": None,
+            "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
+            "next_url": None,
+            "last_url": None,
+        })
+
+        return templates.TemplateResponse("results.html", ctx)
+
 
     # --------------------------
     # SEMANTIC SCHOLAR

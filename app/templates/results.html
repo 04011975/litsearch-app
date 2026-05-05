@@ -654,6 +654,9 @@
 <hr/>
 
 {% if papers and papers|length > 0 %}
+
+  <p class="muted">{{ papers|length }} results shown on this page</p>
+
   {% for p in papers %}
     <div class="card" style="margin: 1rem 0;">
       <h3 style="margin:0 0 0.5rem 0;">{{ p.title }}</h3>
