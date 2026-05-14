@@ -2109,97 +2109,154 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         # =====================================================
         # ALL SOURCES
         # =====================================================
+
+        MULTI_SOURCE_BATCH_SIZE = 200
+        MULTI_SOURCE_MAX_ROUNDS = 10
+
         if source == "all":
             all_papers: list[Paper] = []
+            unique_papers: list[Paper] = []
             source_counts: dict[str, int] = {}
+            seen_raw_keys: set[str] = set()
 
-            for src in MULTI_SOURCE_EXPORT_SOURCES:
-                await set_job_progress(
-                    r,
-                    job_id,
-                    status="running",
-                    source="all",
-                    collected=len(all_papers),
-                    limit=limit,
-                    phase="fetching",
-                    message=f"Fetching {src}",
-                    extra={"current_source": src},
-                )
+            target_unique = int(limit)
+            batch_size = min(MULTI_SOURCE_BATCH_SIZE, target_unique)
 
-                if src == "pubmed":
-                    source_papers, _source_meta = await _fetch_pubmed_export_records(
-                        r=r,
-                        job_id=job_id,
-                        source=src,
-                        q=q,
-                        sort=sort,
-                        limit=limit,
-                        meta=meta,
-                        tenant_id=tenant_id,
-                        cache_stats=cache_stats,
-                        metrics=metrics,
-                        NCBI_API_KEY=NCBI_API_KEY,
-                        TOOL_NAME=TOOL_NAME,
-                        CONTACT_EMAIL=CONTACT_EMAIL,
+            for round_index in range(MULTI_SOURCE_MAX_ROUNDS):
+                for src in MULTI_SOURCE_EXPORT_SOURCES:
+                    await set_job_progress(
+                        r,
+                        job_id,
+                        status="running",
+                        source="all",
+                        collected=len(unique_papers),
+                        limit=target_unique,
+                        phase="fetching",
+                        message=f"Fetching {src} round {round_index + 1}",
+                        extra={
+                            "current_source": src,
+                            "round": round_index + 1,
+                            "unique_collected": len(unique_papers),
+                        },
                     )
 
-                elif src == "europe_pmc":
-                    source_papers, _source_meta = await _fetch_europe_pmc_export_records(
-                        r=r,
-                        job_id=job_id,
-                        source=src,
-                        q=q,
-                        sort=sort,
-                        limit=limit,
-                        meta=meta,
-                        tenant_id=tenant_id,
-                        cache_stats=cache_stats,
-                        metrics=metrics,
+                    round_limit = min(target_unique * 2, batch_size * (round_index + 1))
+
+                    if src == "pubmed":
+                        source_papers, _source_meta = await _fetch_pubmed_export_records(
+                            r=r,
+                            job_id=job_id,
+                            source=src,
+                            q=q,
+                            sort=sort,
+                            limit=round_limit,
+                            meta=meta,
+                            tenant_id=tenant_id,
+                            cache_stats=cache_stats,
+                            metrics=metrics,
+                            NCBI_API_KEY=NCBI_API_KEY,
+                            TOOL_NAME=TOOL_NAME,
+                            CONTACT_EMAIL=CONTACT_EMAIL,
+                        )
+
+                    elif src == "europe_pmc":
+                        source_papers, _source_meta = await _fetch_europe_pmc_export_records(
+                            r=r,
+                            job_id=job_id,
+                            source=src,
+                            q=q,
+                            sort=sort,
+                            limit=round_limit,
+                            meta=meta,
+                            tenant_id=tenant_id,
+                            cache_stats=cache_stats,
+                            metrics=metrics,
+                        )
+
+                    elif src == "openalex":
+                        source_papers, _source_meta = await _fetch_openalex_export_records(
+                            r=r,
+                            job_id=job_id,
+                            source=src,
+                            q=q,
+                            sort=sort,
+                            limit=round_limit,
+                            meta=meta,
+                            tenant_id=tenant_id,
+                            cache_stats=cache_stats,
+                            metrics=metrics,
+                        )
+
+                    elif src == "semantic_scholar":
+                        source_papers, _source_meta = await _fetch_semantic_scholar_export_records(
+                            r=r,
+                            job_id=job_id,
+                            source=src,
+                            q=q,
+                            sort=sort,
+                            limit=round_limit,
+                            meta=meta,
+                            tenant_id=tenant_id,
+                            cache_stats=cache_stats,
+                            metrics=metrics,
+                        )
+
+                    else:
+                        source_papers = []
+
+                    new_papers: list[Paper] = []
+
+                    for p in source_papers or []:
+                        pid = str(getattr(p, "id", "") or "").strip()
+                        doi = str(getattr(p, "doi", "") or "").strip().lower()
+                        title = str(getattr(p, "title", "") or "").strip().lower()
+
+                        raw_key = f"{src}:{doi or pid or title}"
+
+                        if raw_key in seen_raw_keys:
+                            continue
+
+                        seen_raw_keys.add(raw_key)
+
+                        try:
+                            p.source = src
+                        except Exception:
+                            pass
+
+                        new_papers.append(p)
+
+                    source_counts[src] = source_counts.get(src, 0) + len(new_papers)
+                    all_papers.extend(new_papers)
+
+                    unique_papers, incremental_duplicates_removed = deduplicate_papers(all_papers)
+
+                    logger.info(
+                        "multi_source_incremental_dedup job_id=%s round=%s source=%s raw=%s unique=%s duplicates_removed=%s target=%s",
+                        job_id,
+                        round_index + 1,
+                        src,
+                        len(all_papers),
+                        len(unique_papers),
+                        incremental_duplicates_removed,
+                        target_unique,
                     )
 
-                elif src == "openalex":
-                    source_papers, _source_meta = await _fetch_openalex_export_records(
-                        r=r,
-                        job_id=job_id,
-                        source=src,
-                        q=q,
-                        sort=sort,
-                        limit=limit,
-                        meta=meta,
-                        tenant_id=tenant_id,
-                        cache_stats=cache_stats,
-                        metrics=metrics,
-                    )
+                    if round_index > 0 and len(unique_papers) >= target_unique:
+                        break
 
-                elif src == "semantic_scholar":
-                    source_papers, _source_meta = await _fetch_semantic_scholar_export_records(
-                        r=r,
-                        job_id=job_id,
-                        source=src,
-                        q=q,
-                        sort=sort,
-                        limit=limit,
-                        meta=meta,
-                        tenant_id=tenant_id,
-                        cache_stats=cache_stats,
-                        metrics=metrics,
-                    )
+                if len(unique_papers) >= target_unique:
+                    break
 
-                else:
-                    source_papers = []
+            papers = unique_papers[:target_unique]
 
-                source_counts[src] = len(source_papers)
-                all_papers.extend(source_papers)
-
-                logger.info(
-                    "multi_source_fetch_completed job_id=%s source=%s records=%s total_candidates=%s",
-                    job_id,
-                    src,
-                    len(source_papers),
-                    len(all_papers),
-                )
-
-            papers = all_papers
+            logger.info(
+                "multi_source_final_selection job_id=%s raw=%s unique=%s selected=%s target=%s",
+                job_id,
+                len(all_papers),
+                len(unique_papers),
+                len(papers),
+                target_unique,
+            )
 
         # =====================================================
         # OPENALEX
