@@ -151,20 +151,23 @@ def merge_papers(primary: Paper, secondary: Paper) -> Paper:
             getattr(secondary, "source", None),
         )
 
-    return Paper(**data)
+    try:
+        return Paper(**data)
+    except Exception:
+        return primary
 
 
 def deduplicate_papers(papers: Iterable[Paper]) -> tuple[list[Paper], int]:
-    seen: OrderedDict[str, Paper] = OrderedDict()
+    unique_by_key: OrderedDict[str, Paper] = OrderedDict()
     duplicates_removed = 0
 
     for paper in papers:
         key = dedup_key(paper)
 
-        if key in seen:
-            seen[key] = merge_papers(seen[key], paper)
+        if key in unique_by_key:
+            unique_by_key[key] = merge_papers(unique_by_key[key], paper)
             duplicates_removed += 1
         else:
-            seen[key] = paper
+            unique_by_key[key] = paper
 
-    return list(seen.values()), duplicates_removed
+    return list(unique_by_key.values()), duplicates_removed

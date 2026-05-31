@@ -51,6 +51,14 @@ from app.specializations import get_source_info
 
 from app.core.deduplication import deduplicate_papers
 
+from datetime import datetime
+
+from app.all_sources import (
+    all_year_value,
+    all_title_value,
+    interleave_by_source,
+)
+
 
 # =========================================================
 # Small helpers
@@ -479,14 +487,15 @@ def _pubmed_sort(ui_sort: str) -> str:
     return mapping.get(s, "relevance")
 
 def _openalex_sort(ui_sort: str) -> str:
-    # IMPORTANT: jouw openalex connector moet deze waardes accepteren.
-    # Als je connector alleen "relevance"/"year_desc" accepteert, pas connectors/openalex.py _map_sort aan.
     s = _normalize_sort(ui_sort)
+
     if s == "date_desc":
         return "publication_date:desc"
+
     if s == "date_asc":
         return "publication_date:asc"
-    return "relevance"
+
+    return "relevance_score:desc"
 
 def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
     s = _normalize_sort(ui_sort)
@@ -495,6 +504,65 @@ def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
     if s == "date_asc":
         return "bulk", "publicationDate:asc"
     return "relevance", "relevance"
+
+
+def _paper_year_value(p: dict[str, Any] | Paper) -> int:
+    if isinstance(p, dict):
+        value = p.get("year") or p.get("publication_date")
+    else:
+        value = getattr(p, "year", None) or getattr(p, "publication_date", None)
+
+    text = str(value or "")
+
+    match = re.search(r"\b(19|20)\d{2}\b", text)
+    if not match:
+        return 0
+
+    year = int(match.group(0))
+    current_year = datetime.utcnow().year + 1
+
+    if year < 1900 or year > current_year:
+        return 0
+
+    return year
+
+def _paper_date_sort_key_ui(p: dict[str, Any]) -> tuple[int, str]:
+    year = _paper_year_value(p)
+    title = str(p.get("title") or "").lower().strip()
+    return (year, title)
+
+def _ui_relevance_score(p: dict[str, Any], q: str) -> tuple[int, int, str]:
+    title = str(p.get("title") or "").lower()
+    journal = str(p.get("journal") or "").lower()
+
+    score = 0
+    for term in q.lower().split():
+        if term in title:
+            score += 10
+        if term in journal:
+            score += 2
+
+    year = _paper_year_value(p)
+    return (score, year, title)
+
+
+def _sort_papers_for_ui(
+    papers: list[dict[str, Any]],
+    sort: str,
+    q: str = "",
+) -> list[dict[str, Any]]:
+    ui_sort = _normalize_sort(sort)
+
+    if ui_sort == "relevance":
+        return papers
+
+    if ui_sort == "date_desc":
+        return sorted(papers, key=_paper_date_sort_key_ui, reverse=True)
+
+    if ui_sort == "date_asc":
+        return sorted(papers, key=_paper_date_sort_key_ui)
+
+    return papers
 
 def _cap_page(page: int, total_pages: int) -> int:
     return max(1, min(int(page), max(1, int(total_pages))))
@@ -1087,14 +1155,18 @@ async def search(
     epmc_sort = ui_sort
 
 
-
     # --------------------------
     # All Sources
     # --------------------------
     if source == "all":
+        ALL_SEARCH_CANDIDATE_LIMIT = 2000
+        candidate_n = max(int(n), ALL_SEARCH_CANDIDATE_LIMIT)
+        all_pubmed_sort = "relevance"
+        all_openalex_sort = "relevance_score:desc"
+        all_epmc_sort = ui_sort
+
         combined_raw: list[Paper] = []
 
-        # PubMed (eerste pagina)
         try:
             term = build_pubmed_term(
                 q,
@@ -1103,13 +1175,12 @@ async def search(
                 has_abstract=has_abstract,
                 mesh=mesh,
             )
-
             if term:
                 res = await pubmed_search_page(
                     term,
-                    max_results=n,
+                    max_results=candidate_n,
                     retstart=0,
-                    sort=pubmed_sort,
+                    sort=all_pubmed_sort,
                     api_key=NCBI_API_KEY,
                     tool=TOOL_NAME,
                     email=CONTACT_EMAIL,
@@ -1120,58 +1191,85 @@ async def search(
                     tool=TOOL_NAME,
                     email=CONTACT_EMAIL,
                 )
-                combined_raw.extend(fetched or [])
 
+                for p in fetched or []:
+                    try:
+                        p.source = "pubmed"
+                    except Exception:
+                        pass
+
+                combined_raw.extend(fetched or [])
         except Exception:
             logger.exception("ALL: pubmed failed")
 
-        # OpenAlex
         try:
             oa_papers, _ = await _run_sync(
                 openalex_search,
                 q,
                 page=1,
-                n=n,
-                sort=openalex_sort,
+                n=candidate_n,
+                sort=all_openalex_sort,
                 year_min=year_min_i,
                 year_max=year_max_i,
             )
-            combined_raw.extend(oa_papers or [])
 
+            for p in oa_papers or []:
+                try:
+                    p.source = "openalex"
+                except Exception:
+                    pass
+
+            combined_raw.extend(oa_papers or [])
         except Exception:
             logger.exception("ALL: openalex failed")
 
-        # Europe PMC
         try:
             ep_papers, _total, _ = await _europe_pmc_search_compat_async(
                 q,
-                n=n,
+                n=min(candidate_n, 100),
                 cursor="*",
-                sort=ui_sort,
+                sort=all_epmc_sort,
                 year_min=year_min_i,
                 year_max=year_max_i,
                 has_abstract=has_abstract,
                 mesh=mesh,
             )
-            combined_raw.extend(ep_papers or [])
 
+            for p in ep_papers or []:
+                try:
+                    p.source = "europe_pmc"
+                except Exception:
+                    pass
+
+            combined_raw.extend(ep_papers or [])
         except Exception:
             logger.exception("ALL: epmc failed")
 
-        # Semantic Scholar
         try:
             ss_papers, _ = await _run_sync(
                 search_semantic_scholar,
                 q,
                 page=1,
-                n=n,
+                n=candidate_n,
             )
-            combined_raw.extend(ss_papers or [])
 
+            for p in ss_papers or []:
+                try:
+                    p.source = "semantic_scholar"
+                except Exception:
+                    pass
+
+            combined_raw.extend(ss_papers or [])
         except Exception:
             logger.exception("ALL: semantic scholar failed")
 
-        records_before_dedup = len(combined_raw)
+        # UI pipeline:
+        # 1. collect raw records in canonical source order
+        # 2. deduplicate once
+        # 3. convert to dicts
+        # 4. sort once
+        # 5. paginate
+
         deduped_raw, duplicates_removed = deduplicate_papers(combined_raw)
 
         combined_papers = [
@@ -1179,12 +1277,70 @@ async def search(
             for p in deduped_raw
         ]
 
+        if ui_sort == "date_asc":
+            combined_papers = sorted(
+                combined_papers,
+                key=lambda p: (
+                    all_year_value(p) is None,
+                    all_year_value(p) or 9999,
+                    all_title_value(p),
+                ),
+            )
+
+        elif ui_sort == "date_desc":
+            combined_papers = sorted(
+                combined_papers,
+                key=lambda p: (
+                    all_year_value(p) is None,
+                    -(all_year_value(p) or 0),
+                    all_title_value(p),
+                ),
+            )
+            
+        else:
+            combined_papers = interleave_by_source(combined_papers)
+
+
+        total_count = len(combined_papers)
+        page_i = max(1, int(page))
+        total_pages = max(1, math.ceil(total_count / int(n)))
+
+        if page_i > total_pages:
+            page_i = total_pages
+
+        start = (page_i - 1) * int(n)
+        end = start + int(n)
+        paged_papers = combined_papers[start:end]
+
+        base_params = {
+            "q": q,
+            "source": "all",
+            "n": n,
+            "sort": ui_sort,
+            "year_min": year_min,
+            "year_max": year_max,
+            "has_abstract": has_abstract,
+            "mesh": mesh,
+        }
+
+        next_url = (
+            _build_url("/search", {**base_params, "page": page_i + 1})
+            if page_i < total_pages
+            else None
+        )
+
+        last_url = (
+            _build_url("/search", {**base_params, "page": total_pages})
+            if total_pages > 1
+            else None
+        )
+
         ctx = _template_base_context(
             request,
             q=q,
             source="all",
             n=n,
-            page=1,
+            page=page_i,
             sort=ui_sort,
             year_min=year_min,
             year_max=year_max,
@@ -1193,290 +1349,19 @@ async def search(
         )
 
         ctx.update({
-            "papers": combined_papers,
-            "mesh_suggestions": [],
-            "concept_suggestions": [],
-            "total_count": len(combined_papers),
-            "total_pages": 1,
-            "error": None,
-            "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
-            "next_url": None,
-            "last_url": None,
-        })
-
-        return templates.TemplateResponse("results.html", ctx)
-
-
-    # --------------------------
-    # SEMANTIC SCHOLAR
-    # --------------------------
-    if source == "semantic_scholar":
-        error = None
-        request_failed = False
-
-        requested_page = max(1, int(page))
-        redis = getattr(request.app.state, "redis", None)
-        token = (request.query_params.get("token") or "").strip() or None
-
-        ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
-
-        has_abstract_flag = str(has_abstract).strip().lower() in {"1", "true", "yes", "on"}
-
-        # In relevance mode: year filtering temporarily disabled
-        # In bulk mode: year filtering is allowed server-side
-        if ss_mode == "relevance":
-            ss_year_filter_ignored = (year_min_i is not None) or (year_max_i is not None)
-            if ss_year_filter_ignored:
-                warning = (
-                    "Semantic Scholar year filtering is temporarily disabled in relevance mode. "
-                    "The selected year range was ignored."
-                )
-            else:
-                warning = None
-
-            ss_year_min_i = None
-            ss_year_max_i = None
-        else:
-            warning = None
-            ss_year_min_i = year_min_i
-            ss_year_max_i = year_max_i
-
-        cache_params_meta = {
-            "q": q,
-            "mode": ss_mode,
-            "sort": ss_api_sort,
-            "n": n,
-            "year_min": ss_year_min_i,
-            "year_max": ss_year_max_i,
-            "has_abstract": has_abstract_flag,
-        }
-        cache_params_page = {
-            "q": q,
-            "mode": ss_mode,
-            "sort": ss_api_sort,
-            "page": requested_page,
-            "token": token or "",
-            "n": n,
-            "year_min": ss_year_min_i,
-            "year_max": ss_year_max_i,
-            "has_abstract": has_abstract_flag,
-        }
-
-        ck_meta = make_cache_key("cache:semantic_scholar:meta", cache_params_meta)
-        ck_page = make_cache_key("cache:semantic_scholar:page", cache_params_page)
-
-        try:
-            logger.info(
-                "SEMANTIC SCHOLAR SEARCH request q=%r page=%s n=%s mode=%s sort=%r year_min=%r year_max=%r has_abstract=%r token=%r",
-                q,
-                requested_page,
-                n,
-                ss_mode,
-                ss_api_sort,
-                ss_year_min_i,
-                ss_year_max_i,
-                has_abstract_flag,
-                token,
-            )
-
-            cached_meta = await cache_get_json(redis, ck_meta) if redis else None
-            cached_page = await cache_get_json(redis, ck_page) if redis else None
-
-            if not isinstance(cached_meta, dict):
-                cached_meta = None
-            if not isinstance(cached_page, dict):
-                cached_page = None
-
-            logger.info(
-                "SEMANTIC SCHOLAR cache page_hit=%s meta_hit=%s",
-                bool(cached_page),
-                bool(cached_meta),
-            )
-
-            total_count = None
-            papers = []
-            ss_next_token = None
-
-            if cached_page and isinstance(cached_page.get("papers"), list):
-                papers = [
-                    _paper_to_dict(Paper.from_dict(d), source="semantic_scholar")
-                    for d in cached_page["papers"]
-                    if isinstance(d, dict)
-                ]
-                ss_next_token = (cached_page.get("next_token") or "").strip() or None
-            else:
-                if ss_mode == "bulk":
-                    papers_raw, fetched_total, fetched_next_token = await _run_sync(
-                        search_semantic_scholar_bulk,
-                        q,
-                        n=n,
-                        token=token,
-                        sort=ss_api_sort,
-                        year_min=ss_year_min_i,
-                        year_max=ss_year_max_i,
-                        has_abstract=has_abstract_flag,
-                    )
-                    ss_next_token = fetched_next_token
-                else:
-                    papers_raw, fetched_total = await _run_sync(
-                        search_semantic_scholar,
-                        q,
-                        page=requested_page,
-                        n=n,
-                        year_min=ss_year_min_i,
-                        year_max=ss_year_max_i,
-                        has_abstract=has_abstract_flag,
-                    )
-                    ss_next_token = None
-
-                papers_raw = papers_raw or []
-                papers = [
-                    _paper_to_dict(p, source="semantic_scholar")
-                    for p in papers_raw
-                ]
-                total_count = fetched_total
-
-                if redis:
-                    await cache_set_json(
-                        redis,
-                        ck_page,
-                        {
-                            "papers": [p.to_dict() for p in papers_raw],
-                            "next_token": ss_next_token or "",
-                        },
-                        SEMANTIC_SCHOLAR_CACHE_TTL_S,
-                    )
-
-            if cached_meta and "total_count" in cached_meta:
-                try:
-                    total_count = int(cached_meta.get("total_count") or 0)
-                except (TypeError, ValueError):
-                    total_count = len(papers)
-            elif total_count is not None and redis:
-                await cache_set_json(
-                    redis,
-                    ck_meta,
-                    {"total_count": int(total_count or 0)},
-                    SEMANTIC_SCHOLAR_CACHE_TTL_S,
-                )
-
-            if total_count is None:
-                total_count = len(papers)
-
-            if ss_mode == "bulk":
-                # Bulk/token mode: total is best treated as estimated; no direct last-page math
-                total_pages = None
-                next_url = (
-                    _build_url(
-                        "/search",
-                        {
-                            "q": q,
-                            "source": "semantic_scholar",
-                            "n": n,
-                            "page": requested_page + 1,
-                            "sort": ui_sort,
-                            "token": ss_next_token,
-                            "year_min": year_min,
-                            "year_max": year_max,
-                            "has_abstract": has_abstract,
-                            "mesh": mesh,
-                        },
-                    )
-                    if ss_next_token
-                    else None
-                )
-                last_url = None
-            else:
-                total_pages = max(1, math.ceil(total_count / int(n))) if total_count is not None else 1
-                next_url = (
-                    str(request.url.include_query_params(page=requested_page + 1))
-                    if requested_page < total_pages
-                    else None
-                )
-                last_url = (
-                    str(request.url.include_query_params(page=total_pages))
-                    if total_pages > 1
-                    else None
-                )
-
-            logger.info(
-                "SEMANTIC SCHOLAR SEARCH success q=%r page=%s mode=%s results=%s total=%s next_token=%r",
-                q,
-                requested_page,
-                ss_mode,
-                len(papers),
-                total_count,
-                ss_next_token,
-            )
-
-        except SemanticScholarError as e:
-            logger.warning(
-                "SEMANTIC SCHOLAR SEARCH failed q=%r page=%s n=%s mode=%s error=%r",
-                q,
-                requested_page,
-                n,
-                ss_mode,
-                str(e),
-            )
-
-            papers = []
-            error = str(e)
-            request_failed = True
-
-            total_count = None
-            total_pages = None
-            next_url = None
-            last_url = None
-            ss_next_token = None
-
-        except Exception:
-            logger.exception(
-                "SEMANTIC SCHOLAR SEARCH unexpected failure q=%r page=%s n=%s mode=%s",
-                q,
-                requested_page,
-                n,
-                ss_mode,
-            )
-
-            papers = []
-            error = "Semantic Scholar request failed"
-            request_failed = True
-
-            total_count = None
-            total_pages = None
-            next_url = None
-            last_url = None
-            ss_next_token = None
-
-        ctx = _template_base_context(
-            request,
-            q=q,
-            source=source,
-            n=n,
-            page=requested_page,
-            sort=ui_sort,
-            year_min=year_min,
-            year_max=year_max,
-            has_abstract=has_abstract,
-            mesh=mesh,
-        )
-        ctx.update({
-            "papers": papers,
+            "papers": paged_papers,
             "mesh_suggestions": [],
             "concept_suggestions": [],
             "total_count": total_count,
             "total_pages": total_pages,
-            "error": error,
-            "warning": warning,
-            "request_failed": request_failed,
+            "error": None,
+            "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
             "next_url": next_url,
             "last_url": last_url,
-            "ss_mode": ss_mode,
-            "ss_next_token": ss_next_token,
         })
-        ctx["active_source"] = source
+
         return templates.TemplateResponse("results.html", ctx)
-    
+        
 
     # --------------------------
     # EUROPE PMC (cursor paging + deep paging via Redis/ARQ)
@@ -1942,6 +1827,8 @@ async def search(
             return templates.TemplateResponse("results.html", ctx)
 
         per_page = max(1, int(n))
+        fetch_n = per_page
+
         year_min_i = _safe_int(year_min, None)
         year_max_i = _safe_int(year_max, None)
 
@@ -1957,7 +1844,7 @@ async def search(
                 openalex_search,
                 q,
                 page=1,
-                n=per_page,
+                n=fetch_n,
                 sort=openalex_sort,  # mapped for API
                 year_min=year_min_i,
                 year_max=year_max_i,
@@ -1989,6 +1876,7 @@ async def search(
             {"q": q, "page": page_i, "n": per_page, "sort": ui_sort, "year_min": year_min_i, "year_max": year_max_i},
         )
         cached_page = await cache_get_json(redis, ck_page)
+        cached_page = None
 
         logger.info(
             "OPENALEX cache page_hit=%s meta_hit=%s",
@@ -2003,7 +1891,7 @@ async def search(
                 openalex_search,
                 q,
                 page=page_i,
-                n=per_page,
+                n=fetch_n,
                 sort=openalex_sort,  # mapped for API
                 year_min=year_min_i,
                 year_max=year_max_i,
@@ -2011,6 +1899,7 @@ async def search(
             await cache_set_json(redis, ck_page, {"papers": [p.to_dict() for p in (oa_papers or [])]}, OPENALEX_CACHE_TTL_S)
 
         papers = [_paper_to_dict(p, source="openalex") for p in (oa_papers or [])]
+        papers = papers[:per_page]
 
         logger.info(
             "OPENALEX SEARCH success q=%r page=%s results=%s total=%s",
@@ -2047,6 +1936,142 @@ async def search(
             "last_url": last_url,
         })
         return templates.TemplateResponse("results.html", ctx)
+
+
+    # --------------------------
+    # SEMANTIC SCHOLAR
+    # --------------------------
+    if source == "semantic_scholar":
+        page_i = max(1, int(page))
+
+        has_abstract_flag = str(has_abstract).strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+
+        ss_year_min_i = _safe_int(year_min, None)
+        ss_year_max_i = _safe_int(year_max, None)
+
+        try:
+            if ss_mode == "bulk":
+                ss_papers, total_count, _next_token = await _run_sync(
+                    search_semantic_scholar_bulk,
+                    q,
+                    n=n,
+                    token=None,
+                    sort=ss_api_sort,
+                    year_min=ss_year_min_i,
+                    year_max=ss_year_max_i,
+                    has_abstract=has_abstract_flag,
+                )
+            else:
+                ss_papers, total_count = await _run_sync(
+                    search_semantic_scholar,
+                    q,
+                    page=page_i,
+                    n=n,
+                    year_min=ss_year_min_i,
+                    year_max=ss_year_max_i,
+                    has_abstract=has_abstract_flag,
+                )
+
+        except Exception as exc:
+            logger.exception("Semantic Scholar search failed")
+
+            ctx = _template_base_context(
+                request,
+                q=q,
+                source="semantic_scholar",
+                n=n,
+                page=page_i,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
+
+            ctx.update({
+                "papers": [],
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": 0,
+                "total_pages": 1,
+                "error": str(exc),
+                "warning": None,
+                "next_url": None,
+                "last_url": None,
+            })
+
+            return templates.TemplateResponse("results.html", ctx)
+
+        papers = [
+            _paper_to_dict(p, source="semantic_scholar")
+            for p in (ss_papers or [])
+        ]
+
+        total_pages = max(1, math.ceil(int(total_count or 0) / int(n)))
+
+        next_url = (
+            _build_url("/search", {
+                "q": q,
+                "source": "semantic_scholar",
+                "n": n,
+                "page": page_i + 1,
+                "sort": ui_sort,
+                "year_min": year_min,
+                "year_max": year_max,
+                "has_abstract": has_abstract,
+            })
+            if page_i < total_pages
+            else None
+        )
+
+        last_url = (
+            _build_url("/search", {
+                "q": q,
+                "source": "semantic_scholar",
+                "n": n,
+                "page": total_pages,
+                "sort": ui_sort,
+                "year_min": year_min,
+                "year_max": year_max,
+                "has_abstract": has_abstract,
+            })
+            if total_pages > 1
+            else None
+        )
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="semantic_scholar",
+            n=n,
+            page=page_i,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx.update({
+            "papers": papers,
+            "mesh_suggestions": [],
+            "concept_suggestions": [],
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "error": None,
+            "warning": (
+                "Semantic Scholar relevance mode is active."
+                if ss_mode == "relevance"
+                else None
+            ),
+            "next_url": next_url,
+            "last_url": last_url,
+        })
+
+        return templates.TemplateResponse("results.html", ctx)
+
 
     # --------------------------
     # PUBMED (default)
@@ -2483,8 +2508,16 @@ async def export(
 
     papers: list[Paper] = []
 
+
+    # ALL SOURCES
+    if source == "all":
+        raise HTTPException(
+            status_code=400,
+            detail="All-sources export is only available via async export job."
+        )
+
     # OPENALEX
-    if source == "openalex":
+    elif source == "openalex":
         if scope == "bulk":
             cache_key = make_cache_key("export:openalex:bulk", {"q": q, "limit": bulk_limit, "sort": ui_sort,
                                                                "year_min": year_min, "year_max": year_max})
@@ -2821,29 +2854,17 @@ async def export(
                         out: list[Paper] = []
                         page_i = 1
 
-                        while len(out) < bulk_limit:
-                            step = min(100, bulk_limit - len(out))
-                            batch, _total = await _run_sync(
-                                search_semantic_scholar,
-                                q,
-                                page=page_i,
-                                n=step,
-                                year_min=ss_year_min_i,
-                                year_max=ss_year_max_i,
-                                has_abstract=has_abstract_flag,
-                            )
+                        batch, _total = await _run_sync(
+                            search_semantic_scholar,
+                            q,
+                            page=1,
+                            n=bulk_limit,
+                            year_min=ss_year_min_i,
+                            year_max=ss_year_max_i,
+                            has_abstract=has_abstract_flag,
+                        )
 
-                            if not batch:
-                                break
-
-                            out.extend(batch)
-
-                            if len(batch) < step:
-                                break
-
-                            page_i += 1
-
-                        papers = out[:bulk_limit]
+                        papers = (batch or [])[:bulk_limit]
 
                         if redis:
                             await cache_set_json(

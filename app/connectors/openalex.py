@@ -32,28 +32,20 @@ def _openalex_short_id(raw_id: str) -> str:
     return s.split("/")[-1]
 
 def _map_sort(sort: str) -> Optional[str]:
-    """
-    OpenAlex sort keys (docs): display_name, cited_by_count, works_count,
-    publication_date, relevance_score (only with search). :contentReference[oaicite:2]{index=2}
-    """
     s = (sort or "").strip().lower()
 
-    # UI often sends: relevance / year / cited_by_count etc.
-    if s in {"", "default", "relevance"}:
-        return "relevance_score:desc"
-    if s in {"relevance_score"}:
+    if s in {"", "default", "relevance", "relevance_score"}:
         return "relevance_score:desc"
 
-    # “Year” dropdowns: pick publication_date
-    if s in {"year", "newest", "date", "publication_date", "publication_year"}:
+    if s in {"date_desc", "year", "newest", "latest", "recent", "date", "publication_date", "publication_year"}:
         return "publication_date:desc"
-    if s in {"oldest"}:
-        return "publication_date"
+
+    if s in {"date_asc", "oldest", "oldest first"}:
+        return "publication_date:asc"
 
     if s in {"cited_by_count", "citations", "most_cited"}:
         return "cited_by_count:desc"
 
-    # fallback: allow passing a raw OpenAlex sort string
     return sort
 
 def _normalize_doi(raw: Optional[str]) -> Optional[str]:
@@ -161,7 +153,7 @@ def openalex_search(
         r = requests.get(
             f"{BASE_URL}{SEARCH_ENDPOINT}",
             params=params,
-            timeout=(10, 30),
+            timeout=(10, 90),
             headers={"User-Agent": _user_agent()},
         )
     except requests.RequestException as e:
@@ -250,7 +242,7 @@ def openalex_fetch_detail(work_id: str) -> Paper | None:
         r = requests.get(
             f"{BASE_URL}{SEARCH_ENDPOINT}/{wid_short}",
             params=params,
-            timeout=(10, 30),
+            timeout=(10, 90),
             headers={"User-Agent": _user_agent()},
         )
         if r.status_code == 404:

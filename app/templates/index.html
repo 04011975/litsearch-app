@@ -2,11 +2,14 @@
 
 {% block content %}
 <form action="/search" method="get">
-  <input name="q" placeholder="Zoekterm" size="50" />
+  <input name="q" placeholder="Zoekterm" size="50" value="{{ q or '' }}" />
 
   <select name="source">
-    <option value="pubmed">PubMed</option>
-    <option value="europe_pmc">Europe PMC</option>
+    <option value="pubmed" {% if source == "pubmed" %}selected{% endif %}>PubMed</option>
+    <option value="europe_pmc" {% if source == "europe_pmc" %}selected{% endif %}>Europe PMC</option>
+    <option value="openalex" {% if source == "openalex" %}selected{% endif %}>OpenAlex</option>
+    <option value="semantic_scholar" {% if source == "semantic_scholar" %}selected{% endif %}>Semantic Scholar</option>
+    <option value="all" {% if source == "all" %}selected{% endif %}>All sources</option>
   </select>
 
   <button type="submit">Zoek</button>

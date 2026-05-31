@@ -62,8 +62,8 @@ SINGLE_EXPORT_SOURCES = {
 
 MULTI_SOURCE_EXPORT_SOURCES = [
     "pubmed",
-    "europe_pmc",
     "openalex",
+    "europe_pmc",
     "semantic_scholar",
 ]
 
@@ -207,9 +207,26 @@ def _cache_key(prefix: str, payload: dict) -> str:
 
 
 def _pubmed_sort(ui_sort: str) -> str:
-    s = (ui_sort or "").strip().lower()
+    s = _normalize_sort(ui_sort)
+
     if s == "date_desc":
         return "pub_date"
+
+    if s == "date_asc":
+        return "pub_date"
+
+    return "relevance"
+
+
+def _openalex_sort(ui_sort: str) -> str:
+    s = _normalize_sort(ui_sort)
+
+    if s == "date_desc":
+        return "publication_date:desc"
+
+    if s == "date_asc":
+        return "publication_date:asc"
+
     return "relevance"
 
 
@@ -484,6 +501,104 @@ def _paper_from_dict_safe(d: dict) -> Paper:
         return fd(d)
     return Paper(**d)
 
+from datetime import datetime
+
+def _paper_date_sort_key(p: Paper) -> tuple[int, str]:
+    try:
+        year = int(str(getattr(p, "year", "") or "")[:4])
+    except Exception:
+        year = 0
+
+    current_year = datetime.utcnow().year + 1
+
+    if year < 1900 or year > current_year:
+        year = 0
+
+    title = str(getattr(p, "title", "") or "").lower().strip()
+
+    return (year, title)
+
+
+def _simple_relevance_score(p: Paper, q: str) -> tuple[int, int, str]:
+    title = str(getattr(p, "title", "") or "").lower()
+    journal = str(getattr(p, "journal", "") or "").lower()
+
+    score = 0
+    for term in q.lower().split():
+        if term in title:
+            score += 10
+        if term in journal:
+            score += 2
+
+    year = _paper_date_sort_key(p)[0]
+    return (score, year, title)
+
+def _export_relevance_score(p: Paper, q: str) -> tuple[int, int, str]:
+    title = str(getattr(p, "title", "") or "").lower()
+    journal = str(getattr(p, "journal", "") or "").lower()
+    abstract = str(getattr(p, "abstract", "") or "").lower()
+
+    score = 0
+    for term in q.lower().split():
+        if term in title:
+            score += 10
+        if term in journal:
+            score += 2
+        if term in abstract:
+            score += 1
+
+    year = _paper_date_sort_key(p)[0]
+    title_key = title.strip()
+
+    return (score, year, title_key)
+
+
+def _export_year_value(p: Paper) -> int:
+    try:
+        year = int(getattr(p, "year", None) or 0)
+    except Exception:
+        return 0
+
+    current_year = datetime.utcnow().year + 1
+    if year < 1900 or year > current_year:
+        return 0
+
+    return year
+
+
+def _export_relevance_score(p: Paper, q: str) -> tuple[int, int, str]:
+    title = str(getattr(p, "title", "") or "").lower()
+    journal = str(getattr(p, "journal", "") or "").lower()
+
+    score = 0
+    for term in q.lower().split():
+        if term in title:
+            score += 10
+        if term in journal:
+            score += 2
+
+    year = _export_year_value(p)
+    return (score, year, title)
+
+
+def _sort_papers_for_export(
+    papers: list[Paper],
+    sort: str,
+    q: str = "",
+) -> list[Paper]:
+    s = _normalize_sort(sort)
+
+    if s == "date_desc":
+        return sorted(papers, key=_paper_date_sort_key, reverse=True)
+
+    if s == "date_asc":
+        return sorted(papers, key=_paper_date_sort_key)
+
+    if s == "relevance":
+        return papers
+
+    return papers
+
 
 # =========================================================
 # Output writers
@@ -618,9 +733,11 @@ async def _fetch_openalex_export_records(
     effective_cap = min(OPENALEX_BASIC_PAGING_LIMIT, limit)
     max_pages = max(1, math.ceil(effective_cap / per_page))
 
+    openalex_sort = _openalex_sort(sort)
+
     filters_payload = {
         "q": q,
-        "sort": sort,
+        "sort": openalex_sort,
         "year_min": year_min_i,
         "year_max": year_max_i,
     }
@@ -746,7 +863,7 @@ async def _fetch_openalex_export_records(
                             q,
                             page=pno,
                             n=batch_n,
-                            sort=sort,
+                            sort=openalex_sort,
                             year_min=year_min_i,
                             year_max=year_max_i,
                         )
@@ -791,12 +908,13 @@ async def _fetch_openalex_export_records(
                         },
                     )
 
-                    await _cache_set_json(
-                        r,
-                        ck,
-                        {"papers": [_paper_to_dict_safe(p) for p in batch]},
-                        ttl_s,
-                    )
+                    if batch:
+                        await _cache_set_json(
+                            r,
+                            ck,
+                            {"papers": [_paper_to_dict_safe(p) for p in batch]},
+                            ttl_s,
+                        )
 
                 for p in batch:
                     if not getattr(p, "source", None) or getattr(p, "source") == "unknown":
@@ -1052,6 +1170,20 @@ async def _fetch_europe_pmc_export_records(
     }
 
 
+def _pubmed_pmid_key(p: Paper) -> str:
+    pmid = str(getattr(p, "pmid", "") or "").strip()
+    if pmid:
+        return pmid
+
+    pid = str(getattr(p, "id", "") or "").strip()
+    if pid.isdigit():
+        return pid
+
+    url = str(getattr(p, "url", "") or "")
+    if "/pubmed.ncbi.nlm.nih.gov/" in url:
+        return url.rstrip("/").split("/")[-1]
+
+    return ""
 
 
 async def _fetch_pubmed_export_records(
@@ -1209,54 +1341,45 @@ async def _fetch_pubmed_export_records(
             if len(new_pmids) >= (limit - len(papers)):
                 break
 
-        cached_papers: list[Paper] = []
+        details_by_pmid: dict[str, Paper] = {}
         to_fetch: list[str] = []
 
         for pmid in new_pmids:
             dk = f"cache:pubmed:pmid:{pmid}"
             d = await _cache_get_json(r, dk)
+
             if isinstance(d, dict) and d:
                 try:
-                    cached_papers.append(_paper_from_dict_safe(d))
+                    p = _paper_from_dict_safe(d)
+                    details_by_pmid[pmid] = p
                 except Exception:
                     to_fetch.append(pmid)
             else:
                 to_fetch.append(pmid)
 
-        cache_stats["detail_cache_hit_records"] += len(cached_papers)
+        cache_stats["detail_cache_hit_records"] += len(details_by_pmid)
         cache_stats["detail_cache_miss_records"] += len(to_fetch)
 
-        if cached_papers:
-            cached_papers = normalize_papers(cached_papers, source="pubmed")
+        if details_by_pmid:
+            cached_list = normalize_papers(
+                list(details_by_pmid.values()),
+                source="pubmed",
+            )
 
-        for p in cached_papers:
-            if not getattr(p, "source", None) or getattr(p, "source") == "unknown":
-                p.source = "pubmed"
+            details_by_pmid = {
+                _pubmed_pmid_key(p): p
+                for p in cached_list
+                if _pubmed_pmid_key(p)
+            }
 
-        if cached_papers:
+            for p in details_by_pmid.values():
+                if not getattr(p, "source", None) or getattr(p, "source") == "unknown":
+                    p.source = "pubmed"
+
             logger.info(
                 "export_cache_detail source=pubmed stage=pmid_detail_cache_hit returned=%s",
-                len(cached_papers),
+                len(details_by_pmid),
             )
-
-            papers.extend(cached_papers)
-            if len(papers) > limit:
-                papers = papers[:limit]
-
-            collected = len(papers)
-            await set_job_progress(
-                r,
-                job_id,
-                status="running",
-                source=source,
-                collected=collected,
-                limit=limit,
-                phase="fetching",
-                message=f"Fetched {collected} of {limit}",
-            )
-
-            if len(papers) >= limit:
-                break
 
         efetch_chunks: list[list[str]] = [
             to_fetch[i : i + efetch_batch]
@@ -1325,6 +1448,13 @@ async def _fetch_pubmed_export_records(
                             tool=TOOL_NAME,
                             email=CONTACT_EMAIL,
                         ) or []
+
+                    pmid_order = {pmid: i for i, pmid in enumerate(batch_pmids)}
+
+                    fetched_chunk = sorted(
+                        fetched_chunk,
+                        key=lambda p: pmid_order.get(_pubmed_pmid_key(p), 10**9),
+                    )
 
                     if scope.cancel_called:
                         raise RuntimeError(f"PubMed EFetch timeout for chunk {absolute_chunk_index}")
@@ -1425,33 +1555,35 @@ async def _fetch_pubmed_export_records(
                     if not getattr(p, "source", None) or getattr(p, "source") == "unknown":
                         p.source = "pubmed"
 
-                    pmid2 = (getattr(p, "id", "") or "").strip()
+                    pmid2 = _pubmed_pmid_key(p)
                     if pmid2:
+                        details_by_pmid[pmid2] = p
                         dk = f"cache:pubmed:pmid:{pmid2}"
                         await _cache_set_json(r, dk, _paper_to_dict_safe(p), efetch_ttl)
 
-                if fetched_chunk:
-                    papers.extend(fetched_chunk)
-                    if len(papers) > limit:
-                        papers = papers[:limit]
+        ordered_batch = [
+            details_by_pmid[pmid]
+            for pmid in new_pmids
+            if pmid in details_by_pmid
+        ]
 
-                    collected = len(papers)
-                    await set_job_progress(
-                        r,
-                        job_id,
-                        status="running",
-                        source=source,
-                        collected=collected,
-                        limit=limit,
-                        phase="fetching",
-                        message=f"Fetched {collected} of {limit}",
-                    )
+        if ordered_batch:
+            papers.extend(ordered_batch)
 
-                    if len(papers) >= limit:
-                        break
+            if len(papers) > limit:
+                papers = papers[:limit]
 
-            if len(papers) >= limit:
-                break
+            collected = len(papers)
+            await set_job_progress(
+                r,
+                job_id,
+                status="running",
+                source=source,
+                collected=collected,
+                limit=limit,
+                phase="fetching",
+                message=f"Fetched {collected} of {limit}",
+            )
 
         retstart += want
 
@@ -1476,7 +1608,10 @@ async def _fetch_semantic_scholar_export_records(
 ) -> tuple[list[Paper], dict[str, Any]]:
     papers: list[Paper] = []
 
-    has_abstract_i = int((meta.get("has_abstract") or "0").strip() or "0")   
+    has_abstract_i = int((meta.get("has_abstract") or "0").strip() or "0")
+
+    year_min_i = _meta_int(meta, "year_min")
+    year_max_i = _meta_int(meta, "year_max")  
 
     SS_TENANT_RPM = int(os.getenv("SEMANTIC_SCHOLAR_TENANT_RPM", "60"))
     SS_GLOBAL_RPM = int(os.getenv("SEMANTIC_SCHOLAR_GLOBAL_RPM", "300"))
@@ -1789,199 +1924,164 @@ async def _fetch_semantic_scholar_export_records(
                 },
             )
 
-        while len(papers) < effective_limit:
-            offset = (page_i - 1) * batch_cap
-            if offset >= SEMANTIC_SCHOLAR_RELEVANCE_EXPORT_CAP:
-                break
+        want = effective_limit
 
-            want = min(batch_cap, effective_limit - len(papers))
-            if want <= 0:
-                break
+        await set_job_progress(
+            r,
+            job_id,
+            status="running",
+            source=source,
+            collected=0,
+            limit=effective_limit,
+            phase="fetching",
+            message="Fetching Semantic Scholar relevance results",
+            extra={
+                "mode": "relevance",
+                "requested_limit": requested_limit,
+                "effective_limit": effective_limit,
+            },
+        )
 
-            await set_job_progress(
-                r,
-                job_id,
-                status="running",
-                source=source,
-                collected=len(papers),
-                limit=effective_limit,
-                phase="fetching",
-                message=f"Fetching page {page_i}",
-                extra={
-                    "mode": "relevance",
-                    "requested_limit": requested_limit,
-                    "effective_limit": effective_limit,
-                },
+        await set_job_progress(
+            r,
+            job_id,
+            status="running",
+            source=source,
+            collected=0,
+            limit=effective_limit,
+            phase="fetching",
+            message="Waiting for source API",
+            extra={
+                "mode": "relevance",
+                "requested_limit": requested_limit,
+                "effective_limit": effective_limit,
+            },
+        )
+
+        await _throttle_or_sleep(
+            r,
+            f"rl:semantic_scholar:tenant:{tenant_id}:60s",
+            SS_TENANT_RPM,
+            60,
+            sleep_s=0.10,
+        )
+
+        await _throttle_or_sleep(
+            r,
+            "rl:semantic_scholar:global:60s",
+            SS_GLOBAL_RPM,
+            60,
+            sleep_s=0.10,
+        )
+
+        ck = _cache_key(
+            "cache:semantic_scholar:export",
+            {
+                "q": q,
+                "page": 1,
+                "n": want,
+                "sort": "relevance",
+                "year_min": year_min_i,
+                "year_max": year_max_i,
+                "has_abstract": bool(has_abstract_i),
+            },
+        )
+
+        cached = await _cache_get_json(r, ck)
+
+        if cached and isinstance(cached.get("papers"), list):
+            t0_ms = _now_ms()
+
+            batch = [
+                _paper_from_dict_safe(d)
+                for d in cached["papers"]
+                if isinstance(d, dict)
+            ]
+
+            batch = normalize_papers(batch, source="semantic_scholar")
+
+            _log_fetch_timing(
+                source="semantic_scholar",
+                stage="relevance_cache_hit",
+                started_ms=t0_ms,
+                returned=len(batch),
+                batch_size=want,
+                page=1,
             )
 
-            await set_job_progress(
-                r,
-                job_id,
-                status="running",
-                source=source,
-                collected=len(papers),
-                limit=effective_limit,
-                phase="fetching",
-                message="Waiting for source API",
-                extra={
-                    "mode": "relevance",
-                    "requested_limit": requested_limit,
-                    "effective_limit": effective_limit,
-                },
-            )
+            _mark_cache_hit(cache_stats, len(batch))
 
-            await _throttle_or_sleep(
-                r,
-                f"rl:semantic_scholar:tenant:{tenant_id}:60s",
-                SS_TENANT_RPM,
-                60,
-                sleep_s=0.10,
-            )
-            await _throttle_or_sleep(
-                r,
-                "rl:semantic_scholar:global:60s",
-                SS_GLOBAL_RPM,
-                60,
-                sleep_s=0.10,
-            )
+        else:
+            t0_ms = _now_ms()
 
-            ck = _cache_key(
-                "cache:semantic_scholar:export",
-                {
-                    "q": q,
-                    "page": page_i,
-                    "n": want,
-                    "sort": "relevance",
-                    "year_min": None,
-                    "year_max": None,
-                    "has_abstract": bool(has_abstract_i),
-                },
-            )
-            cached = await _cache_get_json(r, ck)
-
-            if cached and isinstance(cached.get("papers"), list):
-                t0_ms = _now_ms()
-                batch = [_paper_from_dict_safe(d) for d in cached["papers"] if isinstance(d, dict)]
-                batch = normalize_papers(batch, source="semantic_scholar")
-                _log_fetch_timing(
-                    source="semantic_scholar",
-                    stage="relevance_cache_hit",
-                    started_ms=t0_ms,
-                    returned=len(batch),
-                    batch_size=want,
-                    page=page_i,
-                )
-                _mark_cache_hit(cache_stats, len(batch))
-            else:
-                t0_ms = _now_ms()
-                with anyio.fail_after(call_timeout_s):
-                    batch, _total = await _run_sync(
-                        search_semantic_scholar,
-                        q,
-                        page=page_i,
-                        n=want,
-                        year_min=None,
-                        year_max=None,
-                        has_abstract=bool(has_abstract_i),
-                    )
-                batch = batch or []
-                batch = normalize_papers(batch, source="semantic_scholar")                    
-
-                _log_fetch_timing(
-                    source="semantic_scholar",
-                    stage="relevance_api_fetch",
-                    started_ms=t0_ms,
-                    returned=len(batch),
-                    batch_size=want,
-                    page=page_i,
-                )
-                _mark_cache_miss(cache_stats, len(batch))
-
-                await _cache_set_json(
-                    r,
-                    ck,
-                    {"papers": [_paper_to_dict_safe(p) for p in batch]},
-                    ttl_s,
+            with anyio.fail_after(call_timeout_s):
+                batch, _total = await _run_sync(
+                    search_semantic_scholar,
+                    q,
+                    page=1,
+                    n=want,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=bool(has_abstract_i),
                 )
 
-            logger.info(
-                "semantic scholar relevance export page=%s want=%s fetched=%s collected=%s requested_limit=%s effective_limit=%s",
-                page_i,
-                want,
-                len(batch),
-                len(papers),
-                requested_limit,
-                effective_limit,
+            batch = batch or []
+            batch = normalize_papers(batch, source="semantic_scholar")
+
+            _log_fetch_timing(
+                source="semantic_scholar",
+                stage="relevance_api_fetch",
+                started_ms=t0_ms,
+                returned=len(batch),
+                batch_size=want,
+                page=1,
             )
 
-            if not batch:
-                break
+            _mark_cache_miss(cache_stats, len(batch))
 
-            made_progress = False
-            duplicates_skipped = 0
-            missing_id_skipped = 0
-
-            for p in batch:
-                pid = (getattr(p, "id", "") or "").strip()
-
-                if not pid:
-                    missing_id_skipped += 1
-                    continue
-
-                if pid in seen_ids:
-                    duplicates_skipped += 1
-                    continue
-
-                seen_ids.add(pid)
-
-                if not getattr(p, "source", None) or getattr(p, "source") == "unknown":
-                    p.source = "semantic_scholar"
-
-                papers.append(p)
-                made_progress = True
-
-                if len(papers) >= effective_limit:
-                    break
-
-            cache_stats["semantic_scholar_duplicates_skipped"] += duplicates_skipped
-            cache_stats["semantic_scholar_missing_id_skipped"] += missing_id_skipped
-
-            if duplicates_skipped or missing_id_skipped:
-                logger.info(
-                    "semantic_scholar_dedup page=%s duplicates=%s missing_ids=%s unique_collected=%s",
-                    page_i,
-                    duplicates_skipped,
-                    missing_id_skipped,
-                    len(papers),
-                )
-
-                if len(papers) >= effective_limit:
-                    break
-
-            collected = len(papers)
-
-            await set_job_progress(
+            await _cache_set_json(
                 r,
-                job_id,
-                status="running",
-                source=source,
-                collected=collected,
-                limit=effective_limit,
-                phase="fetching",
-                message=f"Fetched {collected} of {effective_limit}",
-                extra={
-                    "mode": "relevance",
-                    "requested_limit": requested_limit,
-                    "effective_limit": effective_limit,
-                },
+                ck,
+                {"papers": [_paper_to_dict_safe(p) for p in batch]},
+                ttl_s,
             )
+
+        papers = []
+
+        for p in batch:
+            pid = (getattr(p, "id", "") or "").strip()
+
+            if not pid:
+                continue
+
+            if pid in seen_ids:
+                continue
+
+            seen_ids.add(pid)
+
+            if not getattr(p, "source", None) or getattr(p, "source") == "unknown":
+                p.source = "semantic_scholar"
+
+            papers.append(p)
 
             if len(papers) >= effective_limit:
                 break
-            if not made_progress:
-                break
 
-            page_i += 1
+        await set_job_progress(
+            r,
+            job_id,
+            status="running",
+            source=source,
+            collected=len(papers),
+            limit=effective_limit,
+            phase="fetching",
+            message=f"Fetched {len(papers)} of {effective_limit}",
+            extra={
+                "mode": "relevance",
+                "requested_limit": requested_limit,
+                "effective_limit": effective_limit,
+            },
+        )
 
     return papers, {
         "ss_mode_for_summary": ss_mode_for_summary,
@@ -2110,153 +2210,242 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         # ALL SOURCES
         # =====================================================
 
-        MULTI_SOURCE_BATCH_SIZE = 200
-        MULTI_SOURCE_MAX_ROUNDS = 10
-
         if source == "all":
-            all_papers: list[Paper] = []
-            unique_papers: list[Paper] = []
             source_counts: dict[str, int] = {}
-            seen_raw_keys: set[str] = set()
-
+            failed_sources: list[str] = []
             target_unique = int(limit)
-            batch_size = min(MULTI_SOURCE_BATCH_SIZE, target_unique)
 
-            for round_index in range(MULTI_SOURCE_MAX_ROUNDS):
-                for src in MULTI_SOURCE_EXPORT_SOURCES:
-                    await set_job_progress(
-                        r,
-                        job_id,
-                        status="running",
-                        source="all",
-                        collected=len(unique_papers),
-                        limit=target_unique,
-                        phase="fetching",
-                        message=f"Fetching {src} round {round_index + 1}",
-                        extra={
-                            "current_source": src,
-                            "round": round_index + 1,
-                            "unique_collected": len(unique_papers),
-                        },
+            ALL_EXPORT_CANDIDATE_LIMIT = 2000
+            candidate_n = max(int(target_unique), ALL_EXPORT_CANDIDATE_LIMIT)
+
+            combined_raw: list[Paper] = []
+
+            export_sort = str(sort or "").strip().lower()
+
+            if export_sort in {"oldest", "oldest_first", "date_asc", "asc"}:
+                export_sort = "date_asc"
+            elif export_sort in {"recent", "most_recent", "newest", "date_desc", "desc"}:
+                export_sort = "date_desc"
+            elif export_sort in {"relevance", "relevant", ""}:
+                export_sort = "relevance"
+
+            # Match main.py ALL behavior:
+            # always fetch broad relevance candidate sets first.
+            pubmed_sort = "relevance"
+            openalex_sort = "relevance_score:desc"
+            ui_sort = export_sort
+
+            # PubMed
+            try:
+                term = build_pubmed_term(
+                    q,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=meta.get("has_abstract") in {"1", "true", "True", True},
+                    mesh=meta.get("mesh") or "",
+                )
+
+                if term:
+                    res = await pubmed_search_page(
+                        term,
+                        max_results=candidate_n,
+                        retstart=0,
+                        sort=pubmed_sort,
+                        api_key=NCBI_API_KEY,
+                        tool=TOOL_NAME,
+                        email=CONTACT_EMAIL,
                     )
 
-                    round_limit = min(target_unique * 2, batch_size * (round_index + 1))
+                    fetched = await pubmed_fetch_details(
+                        res.pmids,
+                        api_key=NCBI_API_KEY,
+                        tool=TOOL_NAME,
+                        email=CONTACT_EMAIL,
+                    )
 
-                    if src == "pubmed":
-                        source_papers, _source_meta = await _fetch_pubmed_export_records(
-                            r=r,
-                            job_id=job_id,
-                            source=src,
-                            q=q,
-                            sort=sort,
-                            limit=round_limit,
-                            meta=meta,
-                            tenant_id=tenant_id,
-                            cache_stats=cache_stats,
-                            metrics=metrics,
-                            NCBI_API_KEY=NCBI_API_KEY,
-                            TOOL_NAME=TOOL_NAME,
-                            CONTACT_EMAIL=CONTACT_EMAIL,
-                        )
+                    source_counts["pubmed"] = len(fetched or [])
 
-                    elif src == "europe_pmc":
-                        source_papers, _source_meta = await _fetch_europe_pmc_export_records(
-                            r=r,
-                            job_id=job_id,
-                            source=src,
-                            q=q,
-                            sort=sort,
-                            limit=round_limit,
-                            meta=meta,
-                            tenant_id=tenant_id,
-                            cache_stats=cache_stats,
-                            metrics=metrics,
-                        )
-
-                    elif src == "openalex":
-                        source_papers, _source_meta = await _fetch_openalex_export_records(
-                            r=r,
-                            job_id=job_id,
-                            source=src,
-                            q=q,
-                            sort=sort,
-                            limit=round_limit,
-                            meta=meta,
-                            tenant_id=tenant_id,
-                            cache_stats=cache_stats,
-                            metrics=metrics,
-                        )
-
-                    elif src == "semantic_scholar":
-                        source_papers, _source_meta = await _fetch_semantic_scholar_export_records(
-                            r=r,
-                            job_id=job_id,
-                            source=src,
-                            q=q,
-                            sort=sort,
-                            limit=round_limit,
-                            meta=meta,
-                            tenant_id=tenant_id,
-                            cache_stats=cache_stats,
-                            metrics=metrics,
-                        )
-
-                    else:
-                        source_papers = []
-
-                    new_papers: list[Paper] = []
-
-                    for p in source_papers or []:
-                        pid = str(getattr(p, "id", "") or "").strip()
-                        doi = str(getattr(p, "doi", "") or "").strip().lower()
-                        title = str(getattr(p, "title", "") or "").strip().lower()
-
-                        raw_key = f"{src}:{doi or pid or title}"
-
-                        if raw_key in seen_raw_keys:
-                            continue
-
-                        seen_raw_keys.add(raw_key)
-
+                    for p in fetched or []:
                         try:
-                            p.source = src
+                            p.source = "pubmed"
                         except Exception:
                             pass
 
-                        new_papers.append(p)
+                    combined_raw.extend(fetched or [])
 
-                    source_counts[src] = source_counts.get(src, 0) + len(new_papers)
-                    all_papers.extend(new_papers)
+            except Exception:
+                logger.exception("ALL export: pubmed failed")
 
-                    unique_papers, incremental_duplicates_removed = deduplicate_papers(all_papers)
+            # OpenAlex
+            try:
+                oa_papers, _ = await _run_sync(
+                    openalex_search,
+                    q,
+                    page=1,
+                    n=candidate_n,
+                    sort=openalex_sort,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                )
 
-                    logger.info(
-                        "multi_source_incremental_dedup job_id=%s round=%s source=%s raw=%s unique=%s duplicates_removed=%s target=%s",
-                        job_id,
-                        round_index + 1,
-                        src,
-                        len(all_papers),
-                        len(unique_papers),
-                        incremental_duplicates_removed,
-                        target_unique,
-                    )
+                source_counts["openalex"] = len(oa_papers or [])
 
-                    if round_index > 0 and len(unique_papers) >= target_unique:
-                        break
+                for p in oa_papers or []:
+                    try:
+                        p.source = "openalex"
+                    except Exception:
+                        pass
 
-                if len(unique_papers) >= target_unique:
-                    break
+                combined_raw.extend(oa_papers or [])
 
-            papers = unique_papers[:target_unique]
+            except Exception:
+                logger.exception("ALL export: openalex failed")
+
+            # Europe PMC
+            try:
+                ep_papers, _total, _ = await _run_sync(
+                    europe_pmc_search,
+                    q,
+                    n=min(candidate_n, 100),
+                    cursor="*",
+                    sort=ui_sort,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=meta.get("has_abstract") in {"1", "true", "True", True},
+                )
+
+                source_counts["europe_pmc"] = len(ep_papers or [])
+
+                for p in ep_papers or []:
+                    try:
+                        p.source = "europe_pmc"
+                    except Exception:
+                        pass
+
+                combined_raw.extend(ep_papers or [])
+
+            except Exception as e:
+                source_counts["europe_pmc"] = 0
+                failed_sources.append("europe_pmc")
+
+                logger.warning(
+                    "ALL export: europe_pmc skipped temporary failure: %s",
+                    str(e),
+                )
+
+            # Semantic Scholar
+            # Belangrijk: hetzelfde als main.py — geen date_asc/date_desc meegeven.
+            try:
+                ss_papers, _ = await _run_sync(
+                    search_semantic_scholar,
+                    q,
+                    page=1,
+                    n=candidate_n,
+                )
+
+                for p in ss_papers or []:
+                    try:
+                        p.source = "semantic_scholar"
+                    except Exception:
+                        pass
+
+                source_counts["semantic_scholar"] = len(ss_papers or [])
+
+                combined_raw.extend(ss_papers or [])
+
+            except Exception:
+                logger.exception("ALL export: semantic scholar failed")
 
             logger.info(
-                "multi_source_final_selection job_id=%s raw=%s unique=%s selected=%s target=%s",
-                job_id,
-                len(all_papers),
-                len(unique_papers),
-                len(papers),
-                target_unique,
+                "ALL export source_counts=%s total_raw=%s first_by_source=%s",
+                source_counts,
+                len(combined_raw),
+                {
+                    src: [
+                        (getattr(p, "year", None), str(getattr(p, "title", "") or "")[:50])
+                        for p in combined_raw
+                        if getattr(p, "source", "") == src
+                    ][:5]
+                    for src in ["pubmed", "openalex", "europe_pmc", "semantic_scholar"]
+                },
             )
+
+            papers, cross_source_duplicates_removed = deduplicate_papers(combined_raw)
+
+            def _all_export_year_value(p):
+                raw = getattr(p, "year", None)
+
+                if raw:
+                    try:
+                        y = int(str(raw).strip()[:4])
+                        current_year = datetime.utcnow().year
+
+                        if y < 1900 or y > current_year:
+                            return None
+
+                        return y
+                    except Exception:
+                        pass
+
+                return None
+
+
+            def _all_export_title_value(p):
+                return str(getattr(p, "title", "") or "").strip().lower()
+
+
+            def _all_export_source_value(p):
+                return str(getattr(p, "source", "") or "").strip().lower()
+
+
+            def _interleave_by_source(items):
+                source_order = ["pubmed", "openalex", "europe_pmc", "semantic_scholar"]
+
+                buckets = {src: [] for src in source_order}
+
+                for p in items:
+                    src = _all_export_source_value(p)
+                    if src in buckets:
+                        buckets[src].append(p)
+
+                mixed = []
+                max_len = max((len(v) for v in buckets.values()), default=0)
+
+                for i in range(max_len):
+                    for src in source_order:
+                        if i < len(buckets[src]):
+                            mixed.append(buckets[src][i])
+
+                return mixed
+                  
+            if export_sort == "date_asc":
+                papers = sorted(
+                    papers,
+                    key=lambda p: (
+                        _all_export_year_value(p) is None,
+                        _all_export_year_value(p) or 9999,
+                        _all_export_title_value(p),
+                    ),
+                )
+
+            elif export_sort == "date_desc":
+                papers = sorted(
+                    papers,
+                    key=lambda p: (
+                        _all_export_year_value(p) is None,
+                        -(_all_export_year_value(p) or 0),
+                        _all_export_title_value(p),
+                    ),
+                )
+
+            elif export_sort == "relevance":
+                papers = _interleave_by_source(papers)
+
+            else:
+                papers = _interleave_by_source(papers)
+
+            papers = papers[:target_unique]
+            
 
         # =====================================================
         # OPENALEX
@@ -2338,18 +2527,27 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         
         
         # =====================================================
-        # Final dedup + Write output
+        # Final dedup + sort + Write output
         # =====================================================
         final_limit = limit
         if source == "semantic_scholar":
             final_limit = ss_effective_limit
 
         records_before_final_dedup = len(papers)
-        papers, cross_source_duplicates_removed = deduplicate_papers(papers)
+
+        if source in {"pubmed", "openalex"}:
+            cross_source_duplicates_removed = 0
+        else:
+            papers, cross_source_duplicates_removed = deduplicate_papers(papers)
+
         records_after_final_dedup = len(papers)
 
-        # Bij multi-source eerst dedup, daarna limiet toepassen.
-        # Bij single-source is dit ook veilig.
+        if not (
+            source in {"pubmed", "openalex", "all"}
+            or (source == "semantic_scholar" and ss_mode_for_summary == "bulk")
+        ):
+            papers = _sort_papers_for_export(papers, sort, q=q)
+
         papers = papers[:final_limit]
 
         collected = len(papers)
