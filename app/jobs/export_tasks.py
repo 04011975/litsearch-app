@@ -2234,6 +2234,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             pubmed_sort = "relevance"
             openalex_sort = "relevance_score:desc"
             ui_sort = export_sort
+            epmc_sort = "relevance"
 
             # PubMed
             try:
@@ -2308,7 +2309,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
                     q,
                     n=min(candidate_n, 100),
                     cursor="*",
-                    sort=ui_sort,
+                    sort=epmc_sort,
                     year_min=year_min_i,
                     year_max=year_max_i,
                     has_abstract=meta.get("has_abstract") in {"1", "true", "True", True},

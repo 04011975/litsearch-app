@@ -180,7 +180,7 @@
   <div class="card" style="margin: 0.75rem 0 1rem 0;">
     <h3 style="margin:0 0 0.35rem 0;">Semantic Scholar mode</h3>
 
-    {% if ss_bulk_mode %}
+    {% if sort != "relevance" %}
       <div style="margin:0.2rem 0;">
         <strong>Chronological mode is active.</strong>
       </div>
@@ -402,7 +402,7 @@
   <div style="margin-left:auto; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
     {% if current_source == "semantic_scholar" %}
       <div class="muted" style="margin-right: 0.5rem;">
-        {% if ss_bulk_mode %}
+        {% if sort != "relevance" %}
           Chronological mode = larger export via bulk/token flow.
         {% else %}
           Relevance mode = capped export.

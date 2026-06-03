@@ -1163,7 +1163,7 @@ async def search(
         candidate_n = max(int(n), ALL_SEARCH_CANDIDATE_LIMIT)
         all_pubmed_sort = "relevance"
         all_openalex_sort = "relevance_score:desc"
-        all_epmc_sort = ui_sort
+        all_epmc_sort = "relevance"
 
         combined_raw: list[Paper] = []
 
@@ -1953,11 +1953,14 @@ async def search(
 
         try:
             if ss_mode == "bulk":
-                ss_papers, total_count, _next_token = await _run_sync(
+
+                token = (request.query_params.get("token") or "").strip() or None
+
+                ss_papers, total_count, next_token = await _run_sync(
                     search_semantic_scholar_bulk,
                     q,
                     n=n,
-                    token=None,
+                    token=token,
                     sort=ss_api_sort,
                     year_min=ss_year_min_i,
                     year_max=ss_year_max_i,
@@ -2011,20 +2014,37 @@ async def search(
 
         total_pages = max(1, math.ceil(int(total_count or 0) / int(n)))
 
-        next_url = (
-            _build_url("/search", {
-                "q": q,
-                "source": "semantic_scholar",
-                "n": n,
-                "page": page_i + 1,
-                "sort": ui_sort,
-                "year_min": year_min,
-                "year_max": year_max,
-                "has_abstract": has_abstract,
-            })
-            if page_i < total_pages
-            else None
-        )
+        if ss_mode == "bulk":
+            next_url = (
+                _build_url("/search", {
+                    "q": q,
+                    "source": "semantic_scholar",
+                    "n": n,
+                    "page": page_i + 1,
+                    "sort": ui_sort,
+                    "token": next_token,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                    "has_abstract": has_abstract,
+                })
+                if next_token
+                else None
+            )
+        else:
+            next_url = (
+                _build_url("/search", {
+                    "q": q,
+                    "source": "semantic_scholar",
+                    "n": n,
+                    "page": page_i + 1,
+                    "sort": ui_sort,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                    "has_abstract": has_abstract,
+                })
+                if page_i < total_pages
+                else None
+            )
 
         last_url = (
             _build_url("/search", {
