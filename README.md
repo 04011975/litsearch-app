@@ -1,101 +1,158 @@
 LitSearch — Reproducible Literature Search Tool
 
 Version: 0.4.0
-Sources: PubMed • Europe PMC • OpenAlex • Semantic Scholar
-Architecture: FastAPI • Redis • ARQ • Docker
 
-1. Project Overview
+Sources:
+- PubMed
+- Europe PMC
+- OpenAlex
+- Semantic Scholar
 
-LitSearch is a web-based literature search application designed to support reproducible and transparent academic literature retrieval using programmatic access to scientific literature databases.
+Architecture:
+- FastAPI
+- Redis
+- ARQ
+- Docker
+
+## 1. Project Overview
+
+LitSearch is a web-based literature search application designed to support reproducible, transparent, and multi-source academic literature retrieval through programmatic access to scientific literature databases.
 
 The system currently integrates:
 
-PubMed (NCBI E-utilities)
-Europe PMC
-OpenAlex
-Semantic Scholar
+- PubMed (NCBI E-utilities)
+- Europe PMC
+- OpenAlex
+- Semantic Scholar
 
 LitSearch enables:
 
-structured literature searching
-deterministic query construction
-reproducible result retrieval
-export of bibliographic records
-multi-source comparison
+- structured literature searching
+- deterministic query construction
+- reproducible result retrieval
+- export of bibliographic records
+- cross-source deduplication
+- multi-source comparison
+- aggregated searching across multiple literature databases
 
 LitSearch performs literature identification and retrieval only.
-Interpretation, screening, quality assessment, and inclusion decisions remain the responsibility of the researcher.
 
-2. Research Context & Motivation
+Interpretation, screening, quality assessment, evidence synthesis, and inclusion decisions remain the responsibility of the researcher.
 
-Systematic and semi-systematic literature searches are central to academic research. However, many searches are still performed through graphical interfaces of bibliographic databases, which makes:
+## 2. Research Context & Motivation
 
-precise documentation difficult
-reproduction of queries challenging
-methodological transparency limited
+Systematic, semi-systematic, and exploratory literature searches are central to academic research. However, many searches are still performed through graphical interfaces of bibliographic databases, which can make:
+	• precise documentation difficult
+	• reproduction of queries challenging
+	• methodological transparency limited
+	• comparison across literature sources cumbersome
+LitSearch addresses these challenges by:
+	• exposing all query parameters explicitly
+	• enforcing deterministic query construction
+	• supporting retrieval from multiple literature databases
+	• providing cross-source aggregation and deduplication
+	• enabling reproducible exports
+	• supporting containerized and reproducible execution environments
+By maintaining explicit search parameters, normalized record structures, and reproducible export workflows, LitSearch helps researchers document and reproduce literature searches more reliably.
+The system supports literature identification and retrieval but does not automate study screening, critical appraisal, evidence synthesis, or interpretation of results. These activities remain the responsibility of the researcher.
 
-LitSearch addresses these problems by:
 
-exposing all query parameters explicitly
-enforcing deterministic query construction
-supporting multi-source retrieval
-providing containerized reproducible execution
-enabling exportable search results
+## 3. System Architecture
 
-The system supports reproducible literature search workflows but does not automate interpretation or screening.
-
-3. System Architecture
-
-LitSearch is implemented as a containerized web application.
+LitSearch is implemented as a containerized web application designed for reproducible literature retrieval across multiple scientific literature databases.
 
 Core Components
-FastAPI backend (Python, async)
+FastAPI backend (Python, asynchronous)
 Jinja2 templates for result rendering
 Redis for caching and background task coordination
-ARQ worker for asynchronous jobs
+ARQ worker for asynchronous export jobs
 Docker / Docker Compose for reproducible deployment
-External literature APIs
+Source-specific connector layer
+Cross-source aggregation and deduplication pipeline
 Architecture Overview
+
+Search Flow
+
 User Query
-    ↓
+↓
 FastAPI (main.py)
-    ↓
-Connector layer (per source)
-    ↓
-External APIs
-    ↓
-Canonical Paper model
-    ↓
-Template rendering (Jinja2)
-    ↓
-Optional export (CSV / RIS / XLSX)
-Export Flow (Async)
+↓
+Connector Layer
+↓
+PubMed / Europe PMC / OpenAlex / Semantic Scholar
+↓
+Canonical Paper Model
+↓
+Optional All Sources Aggregation
+↓
+Cross-Source Deduplication
+↓
+Global Sorting
+↓
+Template Rendering (Jinja2)
+
+All Sources Processing
+
+The All Sources workflow performs:
+
+Candidate retrieval from multiple literature sources.
+Merge of source-specific result sets.
+Cross-source deduplication:
+DOI matching
+normalized title matching
+Final result ordering:
+Relevance → source-balanced interleaving
+Most recent → publication year descending
+Oldest first → publication year ascending
+Pagination and export generation.
+Export Flow (Asynchronous)
+
 POST /export/job
-    ↓
-Redis queue
-    ↓
-ARQ worker (run_export_job)
-    ↓
-Batch retrieval (API + cache)
-    ↓
-Deduplication (source-level where needed)
-    ↓
-File generation
-    ↓
-Download endpoint
+↓
+Redis Queue
+↓
+ARQ Worker (run_export_job)
+↓
+Batch Retrieval (API + Cache)
+↓
+Merge and Deduplication
+↓
+File Generation (CSV / RIS / XLSX)
+↓
+Download Endpoint
+
 Caching Strategy
 
 LitSearch uses Redis-based caching for:
 
 paginated API responses
 export batches
-cursor states (Europe PMC)
+Europe PMC cursor states
+export candidate retrieval
 
-Two execution modes:
+Two execution modes are supported:
 
-Cold cache → API-bound (slower)
-Warm cache → cache-only (very fast)
-4. Data Sources
+Cold cache
+
+API-bound retrieval
+higher latency
+
+Warm cache
+
+cache-assisted retrieval
+significantly faster execution
+Design Principle
+
+LitSearch uses a canonical Paper model to normalize metadata from all supported sources. This enables:
+
+source-agnostic rendering
+consistent export behavior
+cross-source deduplication
+unified filtering and sorting
+reproducible search workflows
+
+## 4. Data Sources
+
 PubMed
 
 Accessed through NCBI E-utilities (ESearch + EFetch).
@@ -110,73 +167,82 @@ MeSH-based refinement
 Limitations:
 
 pagination limited to 10,000 results
-
-
-### Europe PMC
+Europe PMC
 
 Europe PMC is used as a complementary biomedical source.
 
 Features:
 
-- broader metadata coverage
-- open access indicators
-- full-text linking
-- cursor-based deep paging
+broader metadata coverage
+open access indicators
+full-text linking
+cursor-based deep paging
 
 Current behavior:
 
-- Europe PMC contributes relevance-ranked candidate records.
-- Final ordering in All Sources is applied centrally after source merging.
-- Cursor-based navigation supports deep retrieval.
+Europe PMC contributes relevance-ranked candidate records.
+Final ordering in All Sources is applied centrally after source merging.
+Cursor-based navigation supports deep retrieval.
 
 Pagination:
 
-- cursor-based navigation
-- deep paging supported via cursor chaining
+cursor-based navigation
+deep paging supported via cursor chaining
+OpenAlex
 
-### Semantic Scholar
+OpenAlex is an open multidisciplinary scholarly database.
+
+Advantages:
+
+strong DOI metadata
+broad interdisciplinary coverage
+citation-rich metadata
+
+Limitations:
+
+no controlled vocabulary (e.g. MeSH)
+Semantic Scholar
 
 Semantic Scholar is integrated through the Graph API.
 
 Supported modes:
 
-#### Relevance mode
-
-- ranked retrieval
-- capped export depth
-- intended for relevance-oriented searches
-
-#### Chronological mode
-
-- token-based bulk pagination
-- supports larger exports
-- used for Most recent and Oldest first sorting
+Relevance mode
+ranked retrieval
+capped export depth
+intended for relevance-oriented searches
+Chronological mode
+token-based bulk pagination
+supports larger exports
+used for Most recent and Oldest first sorting
 
 Features:
 
-- rich metadata
-- author information
-- abstract retrieval
-- venue metadata
+rich metadata
+author information
+abstract retrieval
+venue metadata
 
 Limitations:
 
-- no controlled vocabulary
-- API latency may exceed other sources
-- direct last-page navigation is unavailable in chronological mode
+no controlled vocabulary
+API latency may exceed other sources
+direct last-page navigation is unavailable in chronological mode
 
 
-5. Query Construction & Filtering
+## 5. Query Construction & Filtering
 
-LitSearch constructs queries using explicit parameters:
+LitSearch constructs searches using explicit URL parameters. All search parameters remain visible and reproducible, enabling transparent documentation of search strategies.
 
 Parameter	Description
+source	literature source (PubMed, Europe PMC, OpenAlex, Semantic Scholar, or All Sources)
 q	free-text search query
 year_min	minimum publication year
 year_max	maximum publication year
 has_abstract	filter records with abstracts
 mesh	MeSH refinement (PubMed only)
-mesh_mode	AND / OR combination
+mesh_mode	AND / OR combination for MeSH terms
+sort	relevance, most recent, or oldest first
 page	pagination
 n	records per page
 
@@ -184,29 +250,14 @@ Example:
 
 /search?source=pubmed&q=type%202%20diabetes&year_min=2015&has_abstract=1&page=1
 
-All parameters remain visible in the URL → full reproducibility.
+All parameters remain visible in the URL, enabling:
 
-5. Query Construction & Filtering
+reproducible search execution
+transparent documentation of search strategies
+consistent export generation
+repeatable retrieval across supported literature sources
 
-LitSearch constructs queries using explicit parameters:
-
-Parameter	Description
-q	free-text search query
-year_min	minimum publication year
-year_max	maximum publication year
-has_abstract	filter records with abstracts
-mesh	MeSH refinement (PubMed only)
-mesh_mode	AND / OR combination
-page	pagination
-n	records per page
-
-Example:
-
-/search?source=pubmed&q=type%202%20diabetes&year_min=2015&has_abstract=1&page=1
-
-All parameters remain visible in the URL → full reproducibility.
-
-6. All Sources Aggregation
+## 6. All Sources Aggregation
 
 LitSearch supports a multi-source search mode ("All Sources") that retrieves
 candidate records from:
@@ -221,8 +272,8 @@ Workflow:
 1. Retrieve source-specific candidate sets.
 2. Merge candidate records.
 3. Deduplicate records:
-   - DOI matching
-   - normalized title matching
+   - DOI-based matching
+   - normalized-title matching (fallback)
 4. Apply final global sorting:
    - Relevance → source-balanced interleaving
    - Most recent → publication year descending
@@ -233,7 +284,7 @@ Workflow:
 This design ensures that All Sources exports and on-screen results are generated
 from identical retrieval and deduplication logic.
 
-7. Canonical Data Model
+## 7. Canonical Data Model
 
 All records are normalized into a unified schema.
 
@@ -258,10 +309,12 @@ Benefits:
 
 source-agnostic rendering
 consistent export behavior
-easy extensibility
+cross-source deduplication
+unified filtering and sorting
+easier integration of additional literature sources
+simplified maintenance and extensibility
 
-
-8. Export Functionality
+## 8. Export Functionality
 
 Supported formats:
 
@@ -269,78 +322,87 @@ CSV
 RIS
 XLSX
 
-Scopes:
-
-scope=page
-scope=bulk
-
 Exports are generated from normalized records.
 
 Asynchronous Export Jobs
 
-Large exports are handled asynchronously:
+Large exports are processed asynchronously:
 
 POST /export/job
-    ↓
-ARQ worker
-    ↓
-Batch retrieval
-    ↓
-File generation
-    ↓
-Download via token
+↓
+Redis Queue
+↓
+ARQ Worker
+↓
+Batch Retrieval (API + Cache)
+↓
+Merge and Deduplication
+↓
+Sorting
+↓
+File Generation
+↓
+Download Endpoint
+
 Export Logging
 
-Each export job logs:
+Each export job records:
 
 batches processed
-cache hits / misses
+cache hits and misses
 API fetches
-total records
-duplicates skipped (if applicable)
+total records collected
+duplicates removed (when applicable)
 execution time
+All Sources Export Consistency
 
-### All Sources Export Consistency
-
-All Sources exports use the same retrieval, merge,
-deduplication, and sorting pipeline as the web interface.
+All Sources exports use the same retrieval, merge, deduplication, and sorting pipeline as the web interface.
 
 Validated sort modes:
 
-- Relevance
-- Most recent
-- Oldest first
+Relevance
+Most recent
+Oldest first
 
 Validated export scopes:
 
-- First 100
-- First 500
-- First 1000
-- First 2000
+First 100
+First 500
+First 1000
+First 2000
 
 
-9. Performance Characteristics
+## 9. Performance Characteristics
 
-Performance depends strongly on caching.
+Performance depends strongly on caching, source latency, and external API responsiveness.
 
 Cold Cache (API-bound)
-Europe PMC: ~10s for 1000 records
-Semantic Scholar: ~30s for 1000 records
-Throughput: ~30–100 records/sec
-Warm Cache (cache-only)
-execution time: 0.04 – 0.3 seconds
-throughput: up to ~25,000 records/sec
+
+When records must be retrieved from external APIs:
+
+execution time depends on source-specific latency
+throughput varies by source and query complexity
+large exports may require multiple API requests
+Warm Cache (cache-assisted)
+
+When results are available from Redis cache:
+
+substantially lower response times
+reduced external API traffic
+significantly higher throughput
 Observations
-caching provides >100x speedup
-no 429 (rate limit) or 5xx errors observed
-system is stable under tested loads
-10. Reproducibility
+caching provides substantial performance improvements
+export performance scales with cache availability
+system stability has been validated under tested export workloads
+external API rate limits and latency remain outside application control
+
+## 10. Reproducibility
 
 LitSearch ensures reproducibility through:
 
 containerized execution (Docker)
 explicit query parameters
-deterministic pagination
+deterministic query construction
 canonical data model
 exportable outputs
 
@@ -358,32 +420,55 @@ Additional reproducibility guarantees:
 - deterministic export generation
 - identical candidate generation for UI and exports
 
-11. Installation
+## 11. Installation
+
 Requirements
 Docker
 Docker Compose
 Run
 docker compose up --build
-
-App:
-
+Application
 http://localhost:8001
-
-Health:
-
+Health Check
 http://localhost:8001/health
-12. Development Utilities
+First Startup
+
+On first startup, LitSearch will:
+
+Start the FastAPI application.
+Initialize Redis connectivity.
+Start background export workers.
+Connect to external literature APIs as needed.
+
+The application is ready when the health endpoint returns a successful response.
+
+## 12. Development Utilities
+
 Sanity Check
+Install development dependencies:
 pip install -r requirements-dev.txt
+Run the sanity check suite:
 python scripts/sanity_check.py
+Validation Coverage
+The sanity check validates:
+	• application availability
+	• external API connectivity
+	• PubMed connector
+	• Europe PMC connector
+	• OpenAlex connector
+	• Semantic Scholar connector
+	• pagination behavior
+	• Europe PMC deep paging
+	• CSV and RIS exports
+	• asynchronous export jobs
+	• export download functionality
+	• Redis availability
+The utility provides a lightweight regression test for verifying that the application and its external integrations are functioning correctly after configuration changes or code updates.
 
-Validates:
+## 13. Golden Query Validation
 
-API connectivity
-connectors
-pagination
-export
-12. Golden Query Validation
+The following reference queries can be used for manual validation of source connectivity, pagination, result rendering, and export functionality.
+
 PubMed
 /search?source=pubmed&q=type%202%20diabetes&year_min=2015&has_abstract=1
 Europe PMC
@@ -392,52 +477,93 @@ OpenAlex
 /search?source=openalex&q=type%202%20diabetes
 Semantic Scholar
 /search?source=semantic_scholar&q=type%202%20diabetes
-14. Limitations
-external API rate limits
-PubMed capped at 10,000 results
-metadata completeness varies
-OpenAlex / Semantic Scholar lack controlled vocabulary
-Semantic Scholar may return overlapping records across paginated retrieval.
-LitSearch performs source-level and cross-source deduplication.
-large exports depend on async workers
-15. Development Architecture
+
+These queries are intended as stable regression checks and can be used after code changes, dependency upgrades, or infrastructure updates.
+
+## 14. Limitations
+
+external API rate limits remain outside application control
+PubMed retrieval is limited to the first 10,000 records
+metadata completeness varies across literature sources
+OpenAlex and Semantic Scholar do not provide controlled vocabularies comparable to MeSH
+Semantic Scholar may return overlapping records across paginated retrieval
+LitSearch performs source-level and cross-source deduplication, but upstream data quality may affect matching
+large exports depend on Redis and asynchronous worker availability
+external API latency may influence search and export performance
+
+## 15. Development Architecture
+
+```text
 app/
- ├── main.py
- ├── connectors/
- │    ├── pubmed.py
- │    ├── europe_pmc.py
- │    ├── openalex.py
- │    └── semantic_scholar.py
- │
- ├── models/
- │    └── paper.py
- │
- ├── workers/
- │    └── tasks.py
- │
- └── templates/
+├── main.py
+├── all_sources.py
+├── redis_client.py
+│
+├── connectors/
+│   ├── pubmed.py
+│   ├── europe_pmc.py
+│   ├── openalex.py
+│   └── semantic_scholar.py
+│
+├── core/
+│   ├── deduplication.py
+│   └── retry.py
+│
+├── jobs/
+│   ├── arq_worker.py
+│   ├── epmc_tasks.py
+│   └── export_tasks.py
+│
+├── models/
+│   └── paper.py
+│
+├── enrichers/
+├── services/
+├── specializations/
+└── templates/
 
-16. Future Extensions
+Key responsibilities:
 
-- helper centralization in all_sources.py
+main.py — FastAPI application, request handling, search orchestration, and UI rendering
+all_sources.py — shared All Sources helper logic
+redis_client.py — Redis connection management
+connectors/ — source-specific API integrations
+core/deduplication.py — DOI/title-based deduplication utilities
+core/retry.py — retry helpers for external API calls
+jobs/arq_worker.py — ARQ worker configuration
+jobs/epmc_tasks.py — Europe PMC background/cursor tasks
+jobs/export_tasks.py — asynchronous export generation
+models/paper.py — canonical Paper data model
+templates/ — Jinja2 user interface templates
+
+## 16. Future Extensions
+
+- further helper centralization in all_sources.py
 - improved export streaming
 - additional literature databases
 - enhanced monitoring and observability
 - optional fuzzy-title similarity matching
 - advanced ranking and relevance tuning
 
-17. Citation & Reuse
+## 17. Citation & Reuse
 
-Please cite LitSearch when used in academic work.
-The tool is intended for research and educational purposes.
+LitSearch is intended for research, educational, and methodological purposes.
 
-18. Summary
+If LitSearch contributes to published research, systematic reviews, evidence syntheses, or academic coursework, please acknowledge or cite the project where appropriate.
+
+Users remain responsible for the design, execution, interpretation, and reporting of literature searches conducted with the software.
+
+## 18. Summary
 
 LitSearch operationalizes reproducible literature searching through:
-
-deterministic query construction
-multi-database integration
-canonical normalization
-asynchronous export workflows
-high-performance caching
-containerized reproducibility
+	• deterministic query construction
+	• multi-database integration
+	• All Sources aggregation
+	• cross-source deduplication
+	• canonical record normalization
+	• unified filtering and sorting
+	• consistent UI and export generation
+	• asynchronous export workflows
+	• Redis-based caching
+	• containerized reproducibility
+The system provides a transparent and reproducible framework for literature identification and retrieval across multiple scientific literature databases while remaining source-agnostic and extensible.
