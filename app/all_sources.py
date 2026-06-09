@@ -15,7 +15,7 @@ def _get_value(p, *names):
 
 
 def all_year_value(p):
-    raw = _get_value(p, "year", "publication_year", "pub_year", "publication_date")
+    raw = _get_value(p, "year", "publication_year", "pub_year")
 
     if raw:
         try:

@@ -507,8 +507,6 @@ def _paper_from_dict_safe(d: dict) -> Paper:
         return fd(d)
     return Paper(**d)
 
-from datetime import datetime
-
 def _paper_date_sort_key(p: Paper) -> tuple[int, str]:
     try:
         year = int(str(getattr(p, "year", "") or "")[:4])
