@@ -1,32 +1,45 @@
 from datetime import datetime
 
 
+def _get_value(p, *names):
+    for name in names:
+        if isinstance(p, dict):
+            value = p.get(name)
+        else:
+            value = getattr(p, name, None)
+
+        if value not in (None, ""):
+            return value
+
+    return None
+
+
 def all_year_value(p):
-    raw = p.get("year") or p.get("publication_year") or p.get("pub_year")
+    raw = _get_value(p, "year", "publication_year", "pub_year")
 
     if raw:
         try:
-            y = int(str(raw).strip()[:4])
-
-            current_year = datetime.utcnow().year
-
-            if y < 1900 or y > current_year:
-                return None
-
-            return y
-
+            return int(str(raw)[:4])
         except Exception:
             pass
+
+    date_value = _get_value(p, "publication_date")
+
+    if date_value:
+        try:
+            return datetime.fromisoformat(str(date_value)[:10]).year
+        except Exception:
+            return None
 
     return None
 
 
 def all_title_value(p):
-    return str(p.get("title") or "").strip().lower()
+    return str(_get_value(p, "title") or "").strip().lower()
 
 
 def all_source_value(p):
-    return str(p.get("source") or "").strip().lower()
+    return str(_get_value(p, "source") or "").strip().lower()
 
 
 def interleave_by_source(items):
@@ -38,23 +51,22 @@ def interleave_by_source(items):
     ]
 
     buckets = {src: [] for src in source_order}
+    others = []
 
     for p in items:
         src = all_source_value(p)
 
         if src in buckets:
             buckets[src].append(p)
+        else:
+            others.append(p)
 
-    mixed = []
+    result = []
 
-    max_len = max(
-        (len(v) for v in buckets.values()),
-        default=0,
-    )
-
-    for i in range(max_len):
+    while any(buckets[src] for src in source_order):
         for src in source_order:
-            if i < len(buckets[src]):
-                mixed.append(buckets[src][i])
+            if buckets[src]:
+                result.append(buckets[src].pop(0))
 
-    return mixed
+    result.extend(others)
+    return result

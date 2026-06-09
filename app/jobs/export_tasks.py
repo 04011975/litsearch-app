@@ -42,6 +42,12 @@ from app.connectors.semantic_scholar import (
     search_semantic_scholar_bulk,
 )
 
+from app.all_sources import (
+    all_year_value,
+    all_title_value,
+    interleave_by_source,
+)
+
 from dataclasses import dataclass
 
 logger = logging.getLogger("litsearch.export")
@@ -500,8 +506,6 @@ def _paper_from_dict_safe(d: dict) -> Paper:
     if callable(fd):
         return fd(d)
     return Paper(**d)
-
-from datetime import datetime
 
 def _paper_date_sort_key(p: Paper) -> tuple[int, str]:
     try:
@@ -2372,60 +2376,14 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             )
 
             papers, cross_source_duplicates_removed = deduplicate_papers(combined_raw)
-
-            def _all_export_year_value(p):
-                raw = getattr(p, "year", None)
-
-                if raw:
-                    try:
-                        y = int(str(raw).strip()[:4])
-                        current_year = datetime.utcnow().year
-
-                        if y < 1900 or y > current_year:
-                            return None
-
-                        return y
-                    except Exception:
-                        pass
-
-                return None
-
-
-            def _all_export_title_value(p):
-                return str(getattr(p, "title", "") or "").strip().lower()
-
-
-            def _all_export_source_value(p):
-                return str(getattr(p, "source", "") or "").strip().lower()
-
-
-            def _interleave_by_source(items):
-                source_order = ["pubmed", "openalex", "europe_pmc", "semantic_scholar"]
-
-                buckets = {src: [] for src in source_order}
-
-                for p in items:
-                    src = _all_export_source_value(p)
-                    if src in buckets:
-                        buckets[src].append(p)
-
-                mixed = []
-                max_len = max((len(v) for v in buckets.values()), default=0)
-
-                for i in range(max_len):
-                    for src in source_order:
-                        if i < len(buckets[src]):
-                            mixed.append(buckets[src][i])
-
-                return mixed
                   
             if export_sort == "date_asc":
                 papers = sorted(
                     papers,
                     key=lambda p: (
-                        _all_export_year_value(p) is None,
-                        _all_export_year_value(p) or 9999,
-                        _all_export_title_value(p),
+                        all_year_value(p) is None,
+                        all_year_value(p) or 9999,
+                        all_title_value(p),
                     ),
                 )
 
@@ -2433,17 +2391,17 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
                 papers = sorted(
                     papers,
                     key=lambda p: (
-                        _all_export_year_value(p) is None,
-                        -(_all_export_year_value(p) or 0),
-                        _all_export_title_value(p),
+                        all_year_value(p) is None,
+                        -(all_year_value(p) or 0),
+                        all_title_value(p),
                     ),
                 )
 
             elif export_sort == "relevance":
-                papers = _interleave_by_source(papers)
+                papers = interleave_by_source(papers)
 
             else:
-                papers = _interleave_by_source(papers)
+                papers = interleave_by_source(papers)
 
             papers = papers[:target_unique]
             
