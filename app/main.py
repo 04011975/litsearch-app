@@ -57,6 +57,7 @@ from app.all_sources import (
     all_year_value,
     all_title_value,
     interleave_by_source,
+    build_all_source_results,
 )
 
 
@@ -1159,158 +1160,43 @@ async def search(
     # All Sources
     # --------------------------
     if source == "all":
-        ALL_SEARCH_CANDIDATE_LIMIT = 2000
-        candidate_n = max(int(n), ALL_SEARCH_CANDIDATE_LIMIT)
-        all_pubmed_sort = "relevance"
-        all_openalex_sort = "relevance_score:desc"
-        all_epmc_sort = "relevance"
+        result = await build_all_source_results(
+            q=q,
+            sort=ui_sort,
+            limit=None,
+            page=page,
+            n=n,
+            year_min=year_min_i,
+            year_max=year_max_i,
+            has_abstract=has_abstract,
+            mesh=mesh,
+            mesh_mode="or",
+        )
 
-        combined_raw: list[Paper] = []
-
-        try:
-            term = build_pubmed_term(
-                q,
-                year_min=year_min_i,
-                year_max=year_max_i,
-                has_abstract=has_abstract,
-                mesh=mesh,
-            )
-            if term:
-                res = await pubmed_search_page(
-                    term,
-                    max_results=candidate_n,
-                    retstart=0,
-                    sort=all_pubmed_sort,
-                    api_key=NCBI_API_KEY,
-                    tool=TOOL_NAME,
-                    email=CONTACT_EMAIL,
-                )
-                fetched = await pubmed_fetch_details(
-                    res.pmids,
-                    api_key=NCBI_API_KEY,
-                    tool=TOOL_NAME,
-                    email=CONTACT_EMAIL,
-                )
-
-                for p in fetched or []:
-                    try:
-                        p.source = "pubmed"
-                    except Exception:
-                        pass
-
-                combined_raw.extend(fetched or [])
-        except Exception:
-            logger.exception("ALL: pubmed failed")
-
-        try:
-            oa_papers, _ = await _run_sync(
-                openalex_search,
-                q,
-                page=1,
-                n=candidate_n,
-                sort=all_openalex_sort,
-                year_min=year_min_i,
-                year_max=year_max_i,
-            )
-
-            for p in oa_papers or []:
-                try:
-                    p.source = "openalex"
-                except Exception:
-                    pass
-
-            combined_raw.extend(oa_papers or [])
-        except Exception:
-            logger.exception("ALL: openalex failed")
-
-        try:
-            ep_papers, _total, _ = await _europe_pmc_search_compat_async(
-                q,
-                n=min(candidate_n, 100),
-                cursor="*",
-                sort=all_epmc_sort,
-                year_min=year_min_i,
-                year_max=year_max_i,
-                has_abstract=has_abstract,
-                mesh=mesh,
-            )
-
-            for p in ep_papers or []:
-                try:
-                    p.source = "europe_pmc"
-                except Exception:
-                    pass
-
-            combined_raw.extend(ep_papers or [])
-        except Exception:
-            logger.exception("ALL: epmc failed")
-
-        try:
-            ss_papers, _ = await _run_sync(
-                search_semantic_scholar,
-                q,
-                page=1,
-                n=candidate_n,
-            )
-
-            for p in ss_papers or []:
-                try:
-                    p.source = "semantic_scholar"
-                except Exception:
-                    pass
-
-            combined_raw.extend(ss_papers or [])
-        except Exception:
-            logger.exception("ALL: semantic scholar failed")
-
-        # UI pipeline:
-        # 1. collect raw records in canonical source order
-        # 2. deduplicate once
-        # 3. convert to dicts
-        # 4. sort once
-        # 5. paginate
-
-        deduped_raw, duplicates_removed = deduplicate_papers(combined_raw)
+        total_count = result["total_count"]
+        duplicates_removed = result["duplicates_removed"]
 
         combined_papers = [
-            _paper_to_dict(p, source=getattr(p, "source", "") or "unknown")
-            for p in deduped_raw
+            _paper_to_dict(
+                p,
+                source=getattr(p, "source", "") or "unknown",
+            )
+            for p in result["all_papers"]
         ]
 
-        if ui_sort == "date_asc":
-            combined_papers = sorted(
-                combined_papers,
-                key=lambda p: (
-                    all_year_value(p) is None,
-                    all_year_value(p) or 9999,
-                    all_title_value(p),
-                ),
+        paged_papers = [
+            _paper_to_dict(
+                p,
+                source=getattr(p, "source", "") or "unknown",
             )
+            for p in result["papers"]
+        ]
 
-        elif ui_sort == "date_desc":
-            combined_papers = sorted(
-                combined_papers,
-                key=lambda p: (
-                    all_year_value(p) is None,
-                    -(all_year_value(p) or 0),
-                    all_title_value(p),
-                ),
-            )
-            
-        else:
-            combined_papers = interleave_by_source(combined_papers)
-
-
-        total_count = len(combined_papers)
         page_i = max(1, int(page))
         total_pages = max(1, math.ceil(total_count / int(n)))
 
         if page_i > total_pages:
             page_i = total_pages
-
-        start = (page_i - 1) * int(n)
-        end = start + int(n)
-        paged_papers = combined_papers[start:end]
 
         base_params = {
             "q": q,

@@ -42,11 +42,7 @@ from app.connectors.semantic_scholar import (
     search_semantic_scholar_bulk,
 )
 
-from app.all_sources import (
-    all_year_value,
-    all_title_value,
-    interleave_by_source,
-)
+from app.all_sources import build_all_source_results
 
 from dataclasses import dataclass
 
@@ -237,6 +233,10 @@ def _openalex_sort(ui_sort: str) -> str:
 
 
 def _resolve_export_sources(source: str) -> list[str]:
+
+
+
+
     if source == "all":
         return list(MULTI_SOURCE_EXPORT_SOURCES)
 
@@ -2219,11 +2219,6 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             failed_sources: list[str] = []
             target_unique = int(limit)
 
-            ALL_EXPORT_CANDIDATE_LIMIT = 2000
-            candidate_n = max(int(target_unique), ALL_EXPORT_CANDIDATE_LIMIT)
-
-            combined_raw: list[Paper] = []
-
             export_sort = str(sort or "").strip().lower()
 
             if export_sort in {"oldest", "oldest_first", "date_asc", "asc"}:
@@ -2233,177 +2228,23 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             elif export_sort in {"relevance", "relevant", ""}:
                 export_sort = "relevance"
 
-            # Match main.py ALL behavior:
-            # always fetch broad relevance candidate sets first.
-            pubmed_sort = "relevance"
-            openalex_sort = "relevance_score:desc"
-            ui_sort = export_sort
-            epmc_sort = "relevance"
-
-            # PubMed
-            try:
-                term = build_pubmed_term(
-                    q,
-                    year_min=year_min_i,
-                    year_max=year_max_i,
-                    has_abstract=meta.get("has_abstract") in {"1", "true", "True", True},
-                    mesh=meta.get("mesh") or "",
-                )
-
-                if term:
-                    res = await pubmed_search_page(
-                        term,
-                        max_results=candidate_n,
-                        retstart=0,
-                        sort=pubmed_sort,
-                        api_key=NCBI_API_KEY,
-                        tool=TOOL_NAME,
-                        email=CONTACT_EMAIL,
-                    )
-
-                    fetched = await pubmed_fetch_details(
-                        res.pmids,
-                        api_key=NCBI_API_KEY,
-                        tool=TOOL_NAME,
-                        email=CONTACT_EMAIL,
-                    )
-
-                    source_counts["pubmed"] = len(fetched or [])
-
-                    for p in fetched or []:
-                        try:
-                            p.source = "pubmed"
-                        except Exception:
-                            pass
-
-                    combined_raw.extend(fetched or [])
-
-            except Exception:
-                logger.exception("ALL export: pubmed failed")
-
-            # OpenAlex
-            try:
-                oa_papers, _ = await _run_sync(
-                    openalex_search,
-                    q,
-                    page=1,
-                    n=candidate_n,
-                    sort=openalex_sort,
-                    year_min=year_min_i,
-                    year_max=year_max_i,
-                )
-
-                source_counts["openalex"] = len(oa_papers or [])
-
-                for p in oa_papers or []:
-                    try:
-                        p.source = "openalex"
-                    except Exception:
-                        pass
-
-                combined_raw.extend(oa_papers or [])
-
-            except Exception:
-                logger.exception("ALL export: openalex failed")
-
-            # Europe PMC
-            try:
-                ep_papers, _total, _ = await _run_sync(
-                    europe_pmc_search,
-                    q,
-                    n=min(candidate_n, 100),
-                    cursor="*",
-                    sort=epmc_sort,
-                    year_min=year_min_i,
-                    year_max=year_max_i,
-                    has_abstract=meta.get("has_abstract") in {"1", "true", "True", True},
-                )
-
-                source_counts["europe_pmc"] = len(ep_papers or [])
-
-                for p in ep_papers or []:
-                    try:
-                        p.source = "europe_pmc"
-                    except Exception:
-                        pass
-
-                combined_raw.extend(ep_papers or [])
-
-            except Exception as e:
-                source_counts["europe_pmc"] = 0
-                failed_sources.append("europe_pmc")
-
-                logger.warning(
-                    "ALL export: europe_pmc skipped temporary failure: %s",
-                    str(e),
-                )
-
-            # Semantic Scholar
-            # Belangrijk: hetzelfde als main.py — geen date_asc/date_desc meegeven.
-            try:
-                ss_papers, _ = await _run_sync(
-                    search_semantic_scholar,
-                    q,
-                    page=1,
-                    n=candidate_n,
-                )
-
-                for p in ss_papers or []:
-                    try:
-                        p.source = "semantic_scholar"
-                    except Exception:
-                        pass
-
-                source_counts["semantic_scholar"] = len(ss_papers or [])
-
-                combined_raw.extend(ss_papers or [])
-
-            except Exception:
-                logger.exception("ALL export: semantic scholar failed")
-
-            logger.info(
-                "ALL export source_counts=%s total_raw=%s first_by_source=%s",
-                source_counts,
-                len(combined_raw),
-                {
-                    src: [
-                        (getattr(p, "year", None), str(getattr(p, "title", "") or "")[:50])
-                        for p in combined_raw
-                        if getattr(p, "source", "") == src
-                    ][:5]
-                    for src in ["pubmed", "openalex", "europe_pmc", "semantic_scholar"]
-                },
+            result = await build_all_source_results(
+                q=q,
+                sort=export_sort,
+                limit=target_unique,
+                page=1,
+                n=target_unique,
+                year_min=year_min_i,
+                year_max=year_max_i,
+                has_abstract=meta.get("has_abstract") in {"1", "true", "True", True},
+                mesh=meta.get("mesh") or "",
+                mesh_mode=meta.get("mesh_mode") or "or",
             )
 
-            papers, cross_source_duplicates_removed = deduplicate_papers(combined_raw)
-                  
-            if export_sort == "date_asc":
-                papers = sorted(
-                    papers,
-                    key=lambda p: (
-                        all_year_value(p) is None,
-                        all_year_value(p) or 9999,
-                        all_title_value(p),
-                    ),
-                )
-
-            elif export_sort == "date_desc":
-                papers = sorted(
-                    papers,
-                    key=lambda p: (
-                        all_year_value(p) is None,
-                        -(all_year_value(p) or 0),
-                        all_title_value(p),
-                    ),
-                )
-
-            elif export_sort == "relevance":
-                papers = interleave_by_source(papers)
-
-            else:
-                papers = interleave_by_source(papers)
-
-            papers = papers[:target_unique]
+            papers = result["all_papers"][:target_unique]
+            cross_source_duplicates_removed = result["duplicates_removed"]
+            source_counts = result["source_counts"]
+            failed_sources = result["failed_sources"]
             
 
         # =====================================================
