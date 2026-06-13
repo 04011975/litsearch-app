@@ -1,6 +1,8 @@
 from datetime import datetime
 
+
 import logging
+import time
 from typing import Any
 
 from app.models.paper import Paper
@@ -19,6 +21,9 @@ from app.connectors.semantic_scholar import (
 )
 
 logger = logging.getLogger("litsearch.all_sources")
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 2)
 
 def _get_value(p, *names):
     for name in names:
@@ -123,6 +128,8 @@ async def fetch_all_source_candidates(
 
     # PubMed
     try:
+        pubmed_started = time.perf_counter()
+
         term = build_pubmed_term(
             q,
             year_min=year_min,
@@ -158,6 +165,13 @@ async def fetch_all_source_candidates(
                     pass
 
             combined_raw.extend(fetched or [])
+
+            logger.info(
+                "ALL PERF source=pubmed count=%s elapsed_ms=%s",
+                source_counts["pubmed"],
+                _elapsed_ms(pubmed_started),
+            )
+
         else:
             source_counts["pubmed"] = 0
 
@@ -168,6 +182,8 @@ async def fetch_all_source_candidates(
 
     # OpenAlex
     try:
+        openalex_started = time.perf_counter()
+
         oa_papers, _ = openalex_search(
             q,
             page=1,
@@ -187,6 +203,12 @@ async def fetch_all_source_candidates(
 
         combined_raw.extend(oa_papers or [])
 
+        logger.info(
+            "ALL PERF source=openalex count=%s elapsed_ms=%s",
+            source_counts["openalex"],
+            _elapsed_ms(openalex_started),
+        )        
+
     except Exception:
         source_counts["openalex"] = 0
         failed_sources.append("openalex")
@@ -194,6 +216,8 @@ async def fetch_all_source_candidates(
 
     # Europe PMC
     try:
+        epmc_started = time.perf_counter()
+
         ep_papers, _total, _ = europe_pmc_search(
             q,
             n=min(candidate_n, 100),
@@ -215,6 +239,12 @@ async def fetch_all_source_candidates(
 
         combined_raw.extend(ep_papers or [])
 
+        logger.info(
+            "ALL PERF source=europe_pmc count=%s elapsed_ms=%s",
+            source_counts["europe_pmc"],
+            _elapsed_ms(epmc_started),
+        )        
+
     except Exception as e:
         source_counts["europe_pmc"] = 0
         failed_sources.append("europe_pmc")
@@ -222,6 +252,8 @@ async def fetch_all_source_candidates(
 
     # Semantic Scholar
     try:
+        ss_started = time.perf_counter()
+
         ss_papers, _ = search_semantic_scholar(
             q,
             page=1,
@@ -237,6 +269,12 @@ async def fetch_all_source_candidates(
                 pass
 
         combined_raw.extend(ss_papers or [])
+
+        logger.info(
+            "ALL PERF source=semantic_scholar count=%s elapsed_ms=%s",
+            source_counts["semantic_scholar"],
+            _elapsed_ms(ss_started),
+        )
 
     except Exception:
         source_counts["semantic_scholar"] = 0
@@ -266,6 +304,8 @@ async def build_all_source_results(
     Build deduplicated, centrally sorted All Sources results.
     Used by both UI and export paths.
     """
+
+    total_started = time.perf_counter()
     
     normalized_sort = str(sort or "").strip().lower()
 
@@ -277,6 +317,8 @@ async def build_all_source_results(
         normalized_sort = "relevance"
 
     candidate_n = max(int(limit or n), 2000)
+
+    fetch_started = time.perf_counter()
 
     fetched = await fetch_all_source_candidates(
         q=q,
@@ -292,7 +334,15 @@ async def build_all_source_results(
     source_counts = fetched["source_counts"]
     failed_sources = fetched["failed_sources"]
 
+    fetch_ms = _elapsed_ms(fetch_started)
+
+    dedup_started = time.perf_counter()
+
     deduped_papers, duplicates_removed = deduplicate_papers(combined_raw)
+
+    dedup_ms = _elapsed_ms(dedup_started)
+
+    sort_started = time.perf_counter()
 
     if normalized_sort == "date_asc":
         sorted_papers = sorted(
@@ -317,7 +367,11 @@ async def build_all_source_results(
     else:
         sorted_papers = interleave_by_source(deduped_papers)
 
+    sort_ms = _elapsed_ms(sort_started)
+
     total_count = len(sorted_papers)
+
+    pagination_started = time.perf_counter()
 
     page_i = max(1, int(page or 1))
     n_i = max(1, int(n or 10))
@@ -325,6 +379,22 @@ async def build_all_source_results(
     end = start + n_i
 
     page_papers = sorted_papers[start:end]
+
+    pagination_ms = _elapsed_ms(pagination_started)
+
+    total_ms = _elapsed_ms(total_started)
+
+    logger.info(
+        "ALL PERF total_ms=%s fetch_ms=%s dedup_ms=%s sort_ms=%s pagination_ms=%s raw=%s deduped=%s duplicates_removed=%s",
+        total_ms,
+        fetch_ms,
+        dedup_ms,
+        sort_ms,
+        pagination_ms,
+        len(combined_raw),
+        len(sorted_papers),
+        duplicates_removed,
+    )
 
     return {
         "papers": page_papers,
