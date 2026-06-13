@@ -1,8 +1,9 @@
 from datetime import datetime
 
-
+import asyncio
 import logging
 import time
+
 from typing import Any
 
 from app.models.paper import Paper
@@ -118,27 +119,27 @@ async def fetch_all_source_candidates(
             "failed_sources": list[str],
         }
     """
-    combined_raw: list[Paper] = []
-    source_counts: dict[str, int] = {}
-    failed_sources: list[str] = []
 
     pubmed_sort = "relevance"
     openalex_sort = "relevance_score:desc"
     epmc_sort = "relevance"
 
-    # PubMed
-    try:
-        pubmed_started = time.perf_counter()
+    async def _fetch_pubmed() -> dict[str, Any]:
+        started = time.perf_counter()
+        source = "pubmed"
 
-        term = build_pubmed_term(
-            q,
-            year_min=year_min,
-            year_max=year_max,
-            has_abstract=has_abstract,
-            mesh=mesh,
-        )
+        try:
+            term = build_pubmed_term(
+                q,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
 
-        if term:
+            if not term:
+                return {"source": source, "papers": [], "count": 0, "failed": False}
+
             res = await pubmed_search_page(
                 term,
                 max_results=candidate_n,
@@ -149,137 +150,182 @@ async def fetch_all_source_candidates(
                 email=contact_email,
             )
 
-            fetched = await pubmed_fetch_details(
+            papers = await pubmed_fetch_details(
                 res.pmids,
                 api_key=ncbi_api_key,
                 tool=tool_name,
                 email=contact_email,
             )
 
-            source_counts["pubmed"] = len(fetched or [])
-
-            for p in fetched or []:
+            for p in papers or []:
                 try:
-                    p.source = "pubmed"
+                    p.source = source
                 except Exception:
                     pass
 
-            combined_raw.extend(fetched or [])
-
             logger.info(
-                "ALL PERF source=pubmed count=%s elapsed_ms=%s",
-                source_counts["pubmed"],
-                _elapsed_ms(pubmed_started),
+                "ALL PERF source=%s count=%s elapsed_ms=%s",
+                source,
+                len(papers or []),
+                _elapsed_ms(started),
             )
 
-        else:
-            source_counts["pubmed"] = 0
+            return {
+                "source": source,
+                "papers": papers or [],
+                "count": len(papers or []),
+                "failed": False,
+            }
 
-    except Exception:
-        source_counts["pubmed"] = 0
-        failed_sources.append("pubmed")
-        logger.exception("ALL: pubmed failed")
+        except Exception:
+            logger.exception("ALL: pubmed failed")
+            return {"source": source, "papers": [], "count": 0, "failed": True}
 
-    # OpenAlex
-    try:
-        openalex_started = time.perf_counter()
+    async def _fetch_openalex() -> dict[str, Any]:
+        started = time.perf_counter()
+        source = "openalex"
 
-        oa_papers, _ = openalex_search(
-            q,
-            page=1,
-            n=candidate_n,
-            sort=openalex_sort,
-            year_min=year_min,
-            year_max=year_max,
-        )
+        try:
+            papers, _ = await asyncio.to_thread(
+                openalex_search,
+                q,
+                page=1,
+                n=candidate_n,
+                sort=openalex_sort,
+                year_min=year_min,
+                year_max=year_max,
+            )
 
-        source_counts["openalex"] = len(oa_papers or [])
+            for p in papers or []:
+                try:
+                    p.source = source
+                except Exception:
+                    pass
 
-        for p in oa_papers or []:
-            try:
-                p.source = "openalex"
-            except Exception:
-                pass
+            logger.info(
+                "ALL PERF source=%s count=%s elapsed_ms=%s",
+                source,
+                len(papers or []),
+                _elapsed_ms(started),
+            )
 
-        combined_raw.extend(oa_papers or [])
+            return {
+                "source": source,
+                "papers": papers or [],
+                "count": len(papers or []),
+                "failed": False,
+            }
 
-        logger.info(
-            "ALL PERF source=openalex count=%s elapsed_ms=%s",
-            source_counts["openalex"],
-            _elapsed_ms(openalex_started),
-        )        
+        except Exception:
+            logger.exception("ALL: openalex failed")
+            return {"source": source, "papers": [], "count": 0, "failed": True}
 
-    except Exception:
-        source_counts["openalex"] = 0
-        failed_sources.append("openalex")
-        logger.exception("ALL: openalex failed")
+    async def _fetch_europe_pmc() -> dict[str, Any]:
+        started = time.perf_counter()
+        source = "europe_pmc"
 
-    # Europe PMC
-    try:
-        epmc_started = time.perf_counter()
+        try:
+            papers, _total, _ = await asyncio.to_thread(
+                europe_pmc_search,
+                q,
+                n=min(candidate_n, 100),
+                cursor="*",
+                sort=epmc_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
 
-        ep_papers, _total, _ = europe_pmc_search(
-            q,
-            n=min(candidate_n, 100),
-            cursor="*",
-            sort=epmc_sort,
-            year_min=year_min,
-            year_max=year_max,
-            has_abstract=has_abstract,
-            mesh=mesh,
-        )
+            for p in papers or []:
+                try:
+                    p.source = source
+                except Exception:
+                    pass
 
-        source_counts["europe_pmc"] = len(ep_papers or [])
+            logger.info(
+                "ALL PERF source=%s count=%s elapsed_ms=%s",
+                source,
+                len(papers or []),
+                _elapsed_ms(started),
+            )
 
-        for p in ep_papers or []:
-            try:
-                p.source = "europe_pmc"
-            except Exception:
-                pass
+            return {
+                "source": source,
+                "papers": papers or [],
+                "count": len(papers or []),
+                "failed": False,
+            }
 
-        combined_raw.extend(ep_papers or [])
+        except Exception as e:
+            logger.warning("ALL: europe_pmc failed/skipped: %s", str(e))
+            return {"source": source, "papers": [], "count": 0, "failed": True}
 
-        logger.info(
-            "ALL PERF source=europe_pmc count=%s elapsed_ms=%s",
-            source_counts["europe_pmc"],
-            _elapsed_ms(epmc_started),
-        )        
+    async def _fetch_semantic_scholar() -> dict[str, Any]:
+        started = time.perf_counter()
+        source = "semantic_scholar"
 
-    except Exception as e:
-        source_counts["europe_pmc"] = 0
-        failed_sources.append("europe_pmc")
-        logger.warning("ALL: europe_pmc failed/skipped: %s", str(e))
+        try:
+            papers, _ = await asyncio.to_thread(
+                search_semantic_scholar,
+                q,
+                page=1,
+                n=candidate_n,
+            )
 
-    # Semantic Scholar
-    try:
-        ss_started = time.perf_counter()
+            for p in papers or []:
+                try:
+                    p.source = source
+                except Exception:
+                    pass
 
-        ss_papers, _ = search_semantic_scholar(
-            q,
-            page=1,
-            n=candidate_n,
-        )
+            logger.info(
+                "ALL PERF source=%s count=%s elapsed_ms=%s",
+                source,
+                len(papers or []),
+                _elapsed_ms(started),
+            )
 
-        source_counts["semantic_scholar"] = len(ss_papers or [])
+            return {
+                "source": source,
+                "papers": papers or [],
+                "count": len(papers or []),
+                "failed": False,
+            }
 
-        for p in ss_papers or []:
-            try:
-                p.source = "semantic_scholar"
-            except Exception:
-                pass
+        except Exception:
+            logger.exception("ALL: semantic scholar failed")
+            return {"source": source, "papers": [], "count": 0, "failed": True}
 
-        combined_raw.extend(ss_papers or [])
+    results = await asyncio.gather(
+        _fetch_pubmed(),
+        _fetch_openalex(),
+        _fetch_europe_pmc(),
+        _fetch_semantic_scholar(),
+    )
 
-        logger.info(
-            "ALL PERF source=semantic_scholar count=%s elapsed_ms=%s",
-            source_counts["semantic_scholar"],
-            _elapsed_ms(ss_started),
-        )
+    by_source = {result["source"]: result for result in results}
 
-    except Exception:
-        source_counts["semantic_scholar"] = 0
-        failed_sources.append("semantic_scholar")
-        logger.exception("ALL: semantic scholar failed")
+    source_order = [
+        "pubmed",
+        "openalex",
+        "europe_pmc",
+        "semantic_scholar",
+    ]
+
+    combined_raw: list[Paper] = []
+    source_counts: dict[str, int] = {}
+    failed_sources: list[str] = []
+
+    for source in source_order:
+        result = by_source[source]
+        papers = result["papers"]
+
+        combined_raw.extend(papers)
+        source_counts[source] = result["count"]
+
+        if result["failed"]:
+            failed_sources.append(source)
 
     return {
         "combined_raw": combined_raw,
