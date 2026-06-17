@@ -37,12 +37,16 @@ from app.models.paper import Paper
 from app.connectors.europe_pmc import europe_pmc_search
 from app.connectors.openalex import openalex_search
 from app.connectors.pubmed import build_pubmed_term, pubmed_fetch_details, pubmed_search_page
+
 from app.connectors.semantic_scholar import (
     search_semantic_scholar,
     search_semantic_scholar_bulk,
 )
 
-from app.all_sources import build_all_source_results
+from app.all_sources import (
+    build_all_source_results,
+    normalize_all_sources_sort,
+)
 
 from dataclasses import dataclass
 
@@ -247,14 +251,7 @@ def _resolve_export_sources(source: str) -> list[str]:
 
 
 def _normalize_sort(sort: str | None) -> str:
-    s = (sort or "").strip().lower()
-    if s in {"relevance", "date_desc", "date_asc"}:
-        return s
-    if s in {"most recent first", "recent", "newest", "latest"}:
-        return "date_desc"
-    if s in {"oldest first", "oldest"}:
-        return "date_asc"
-    return "relevance"
+    return normalize_all_sources_sort(sort)
 
 
 def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:

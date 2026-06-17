@@ -71,6 +71,28 @@ def all_title_value(p):
 def all_source_value(p):
     return str(_get_value(p, "source") or "").strip().lower()
 
+def normalize_all_sources_sort(sort: str | None) -> str:
+    s = (sort or "").strip().lower()
+
+    if s in {"relevance", "date_desc", "date_asc"}:
+        return s
+
+    if s in {"most recent first", "recent", "most_recent", "newest", "latest", "desc"}:
+        return "date_desc"
+
+    if s in {"oldest first", "oldest", "oldest_first", "asc"}:
+        return "date_asc"
+
+    if s in {"year_desc", "pub_date_desc", "pub+date"}:
+        return "date_desc"
+
+    if s in {"year_asc", "pub_date_asc"}:
+        return "date_asc"
+
+    if s in {"relevant", ""}:
+        return "relevance"
+
+    return "relevance"
 
 def interleave_by_source(items):
     source_order = [
@@ -358,14 +380,7 @@ async def build_all_source_results(
 
     total_started = time.perf_counter()
     
-    normalized_sort = str(sort or "").strip().lower()
-
-    if normalized_sort in {"oldest", "oldest_first", "date_asc", "asc"}:
-        normalized_sort = "date_asc"
-    elif normalized_sort in {"recent", "most_recent", "newest", "date_desc", "desc"}:
-        normalized_sort = "date_desc"
-    elif normalized_sort in {"relevance", "relevant", ""}:
-        normalized_sort = "relevance"
+    normalized_sort = normalize_all_sources_sort(sort)
 
     candidate_n = max(int(limit or n), ALL_SOURCES_CANDIDATE_LIMIT)
 

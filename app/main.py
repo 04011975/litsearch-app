@@ -58,6 +58,7 @@ from app.all_sources import (
     all_title_value,
     interleave_by_source,
     build_all_source_results,
+    normalize_all_sources_sort,
 )
 
 
@@ -463,19 +464,7 @@ def _europe_pmc_external_url(p: Any) -> str:
 # -------------------------
 
 def _normalize_sort(sort: str | None) -> str:
-    s = (sort or "").strip().lower()
-    if s in {"relevance", "date_desc", "date_asc"}:
-        return s
-    if s in {"most recent first", "recent", "newest", "latest"}:
-        return "date_desc"
-    if s in {"oldest first", "oldest"}:
-        return "date_asc"
-    if s in {"year_desc", "pub_date_desc", "pub+date"}:
-        return "date_desc"
-    if s in {"year_asc", "pub_date_asc"}:
-        return "date_asc"
-    return "relevance"
-
+    return normalize_all_sources_sort(sort)
 
 def _pubmed_sort(ui_sort: str) -> str:
     s = _normalize_sort(ui_sort)
