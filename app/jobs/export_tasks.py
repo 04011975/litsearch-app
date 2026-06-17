@@ -37,12 +37,19 @@ from app.models.paper import Paper
 from app.connectors.europe_pmc import europe_pmc_search
 from app.connectors.openalex import openalex_search
 from app.connectors.pubmed import build_pubmed_term, pubmed_fetch_details, pubmed_search_page
+
 from app.connectors.semantic_scholar import (
     search_semantic_scholar,
     search_semantic_scholar_bulk,
 )
 
-from app.all_sources import build_all_source_results
+from app.all_sources import (
+    build_all_source_results,
+    normalize_all_sources_sort,
+    all_sources_pubmed_sort,
+    all_sources_openalex_sort,
+    all_sources_semantic_scholar_sort_mode,
+)
 
 from dataclasses import dataclass
 
@@ -209,33 +216,17 @@ def _cache_key(prefix: str, payload: dict) -> str:
 
 
 def _pubmed_sort(ui_sort: str) -> str:
-    s = _normalize_sort(ui_sort)
-
-    if s == "date_desc":
-        return "pub_date"
-
-    if s == "date_asc":
-        return "pub_date"
-
-    return "relevance"
+    return all_sources_pubmed_sort(ui_sort)
 
 
 def _openalex_sort(ui_sort: str) -> str:
-    s = _normalize_sort(ui_sort)
+    return all_sources_openalex_sort(ui_sort)
 
-    if s == "date_desc":
-        return "publication_date:desc"
 
-    if s == "date_asc":
-        return "publication_date:asc"
-
-    return "relevance"
-
+def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
+    return all_sources_semantic_scholar_sort_mode(ui_sort)
 
 def _resolve_export_sources(source: str) -> list[str]:
-
-
-
 
     if source == "all":
         return list(MULTI_SOURCE_EXPORT_SOURCES)
@@ -247,24 +238,7 @@ def _resolve_export_sources(source: str) -> list[str]:
 
 
 def _normalize_sort(sort: str | None) -> str:
-    s = (sort or "").strip().lower()
-    if s in {"relevance", "date_desc", "date_asc"}:
-        return s
-    if s in {"most recent first", "recent", "newest", "latest"}:
-        return "date_desc"
-    if s in {"oldest first", "oldest"}:
-        return "date_asc"
-    return "relevance"
-
-
-def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
-    s = (ui_sort or "").strip().lower()
-    if s == "date_desc":
-        return "bulk", "publicationDate:desc"
-    if s == "date_asc":
-        return "bulk", "publicationDate:asc"
-    return "relevance", "relevance"
-
+    return normalize_all_sources_sort(sort)
 
 async def _cache_get_json(r: ArqRedis, key: str) -> Optional[dict]:
     v = await r.get(key)
