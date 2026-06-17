@@ -3,6 +3,13 @@ from datetime import datetime
 import asyncio
 import logging
 import time
+import os
+
+logger = logging.getLogger("litsearch.all_sources")
+
+ALL_SOURCES_CANDIDATE_LIMIT = int(
+    os.getenv("ALL_SOURCES_CANDIDATE_LIMIT", "2000")
+)
 
 from typing import Any
 
@@ -20,8 +27,6 @@ from app.connectors.semantic_scholar import (
     search_semantic_scholar,
     search_semantic_scholar_bulk,
 )
-
-logger = logging.getLogger("litsearch.all_sources")
 
 def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 2)
@@ -362,7 +367,15 @@ async def build_all_source_results(
     elif normalized_sort in {"relevance", "relevant", ""}:
         normalized_sort = "relevance"
 
-    candidate_n = max(int(limit or n), 2000)
+    candidate_n = max(int(limit or n), ALL_SOURCES_CANDIDATE_LIMIT)
+
+    logger.info(
+        "ALL PERF candidate_limit=%s candidate_n=%s requested_limit=%s page_size=%s",
+        ALL_SOURCES_CANDIDATE_LIMIT,
+        candidate_n,
+        limit,
+        n,
+    )
 
     fetch_started = time.perf_counter()
 
