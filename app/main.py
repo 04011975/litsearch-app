@@ -59,6 +59,9 @@ from app.all_sources import (
     interleave_by_source,
     build_all_source_results,
     normalize_all_sources_sort,
+    all_sources_pubmed_sort,
+    all_sources_openalex_sort,
+    all_sources_semantic_scholar_sort_mode,
 )
 
 
@@ -467,34 +470,15 @@ def _normalize_sort(sort: str | None) -> str:
     return normalize_all_sources_sort(sort)
 
 def _pubmed_sort(ui_sort: str) -> str:
-    s = _normalize_sort(ui_sort)
+    return all_sources_pubmed_sort(ui_sort)
 
-    mapping = {
-        "relevance": "relevance",
-        "date_desc": "pub_date",
-    }
-
-    return mapping.get(s, "relevance")
 
 def _openalex_sort(ui_sort: str) -> str:
-    s = _normalize_sort(ui_sort)
+    return all_sources_openalex_sort(ui_sort)
 
-    if s == "date_desc":
-        return "publication_date:desc"
-
-    if s == "date_asc":
-        return "publication_date:asc"
-
-    return "relevance_score:desc"
 
 def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
-    s = _normalize_sort(ui_sort)
-    if s == "date_desc":
-        return "bulk", "publicationDate:desc"
-    if s == "date_asc":
-        return "bulk", "publicationDate:asc"
-    return "relevance", "relevance"
-
+    return all_sources_semantic_scholar_sort_mode(ui_sort)
 
 def _paper_year_value(p: dict[str, Any] | Paper) -> int:
     if isinstance(p, dict):

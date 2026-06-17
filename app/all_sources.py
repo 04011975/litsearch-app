@@ -94,6 +94,38 @@ def normalize_all_sources_sort(sort: str | None) -> str:
 
     return "relevance"
 
+def all_sources_pubmed_sort(sort: str | None) -> str:
+    s = normalize_all_sources_sort(sort)
+
+    if s in {"date_desc", "date_asc"}:
+        return "pub_date"
+
+    return "relevance"
+
+
+def all_sources_openalex_sort(sort: str | None) -> str:
+    s = normalize_all_sources_sort(sort)
+
+    if s == "date_desc":
+        return "publication_date:desc"
+
+    if s == "date_asc":
+        return "publication_date:asc"
+
+    return "relevance_score:desc"
+
+
+def all_sources_semantic_scholar_sort_mode(sort: str | None) -> tuple[str, str]:
+    s = normalize_all_sources_sort(sort)
+
+    if s == "date_desc":
+        return "bulk", "publicationDate:desc"
+
+    if s == "date_asc":
+        return "bulk", "publicationDate:asc"
+
+    return "relevance", "relevance"
+
 def interleave_by_source(items):
     source_order = [
         "pubmed",
