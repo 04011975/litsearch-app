@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from app.services.export_service import build_export_request_params
+from dataclasses import dataclass 
 
 @dataclass(frozen=True)
 class ExportRequestParams:

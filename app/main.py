@@ -51,6 +51,8 @@ from app.specializations import get_source_info
 
 from app.core.deduplication import deduplicate_papers
 
+from app.services.export_service import build_export_request_params
+
 from datetime import datetime
 
 from app.all_sources import (
@@ -63,7 +65,6 @@ from app.all_sources import (
     all_sources_openalex_sort,
     all_sources_semantic_scholar_sort_mode,
 )
-
 
 # =========================================================
 # Small helpers
@@ -2371,6 +2372,14 @@ async def export(
     year_max = export_params.year_max
     has_abstract = export_params.has_abstract
     mesh_mode = export_params.mesh_mode
+
+    if source == "europe_pmc" and ui_sort != "relevance":
+        ui_sort = "relevance"
+
+    pubmed_sort = _pubmed_sort(ui_sort)
+    openalex_sort = _openalex_sort(ui_sort)
+    epmc_sort = ui_sort
+    ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
 
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
