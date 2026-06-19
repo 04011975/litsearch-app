@@ -2347,31 +2347,30 @@ async def export(
     scope: str = Query("page", pattern="^(page|bulk)$"),
     bulk_limit: int = Query(BULK_EXPORT_DEFAULT, ge=1, le=EXPORT_HARD_CAP),
 ):
+
     params = dict(request.query_params)
 
-    q = (params.get("q") or "").strip()
-    source = (params.get("source") or "pubmed").strip()
-    n = max(1, min(int(_safe_int(params.get("n"), 10) or 10), 50))
-    page = max(1, int(_safe_int(params.get("page"), 1) or 1))
-    token = (params.get("token") or "").strip() or None
+    export_params = build_export_request_params(
+        query_params=params,
+        fmt=fmt,
+        scope=scope,
+        bulk_limit=bulk_limit,
+        normalize_sort=_normalize_sort,
+        normalize_mesh=_normalize_mesh,
+        safe_int=_safe_int,
+    )
 
-    ui_sort = _normalize_sort(params.get("sort") or "relevance")
-    if source == "europe_pmc" and ui_sort != "relevance":
-        ui_sort = "relevance"
-
-    pubmed_sort = _pubmed_sort(ui_sort)
-    openalex_sort = _openalex_sort(ui_sort)
-    epmc_sort = ui_sort
-    ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
-
-    mesh = _normalize_mesh(params.get("mesh", "") or "")
-    year_min = (params.get("year_min") or "").strip()
-    year_max = (params.get("year_max") or "").strip()
-    has_abstract = int(_safe_int(params.get("has_abstract"), 0) or 0)
-
-    mesh_mode = (params.get("mesh_mode") or "or").strip().lower()
-    if mesh_mode not in {"and", "or"}:
-        mesh_mode = "or"
+    q = export_params.q
+    source = export_params.source
+    n = export_params.n
+    page = export_params.page
+    token = export_params.token
+    ui_sort = export_params.sort
+    mesh = export_params.mesh
+    year_min = export_params.year_min
+    year_max = export_params.year_max
+    has_abstract = export_params.has_abstract
+    mesh_mode = export_params.mesh_mode
 
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
