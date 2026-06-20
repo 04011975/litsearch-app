@@ -64,3 +64,17 @@ def build_export_request_params(
         mesh_mode=mesh_mode,
         token=token,
     )
+
+def validate_export_request_params(
+    params: ExportRequestParams,
+    *,
+    allowed_sources: set[str],
+    export_hard_cap: int,
+) -> int:
+    if not params.q:
+        raise ValueError("Query is empty")
+
+    if params.source not in allowed_sources:
+        raise ValueError(f"Unknown source: {params.source}")
+
+    return min(max(1, int(params.bulk_limit)), int(export_hard_cap))

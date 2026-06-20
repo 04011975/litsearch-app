@@ -51,7 +51,10 @@ from app.specializations import get_source_info
 
 from app.core.deduplication import deduplicate_papers
 
-from app.services.export_service import build_export_request_params
+from app.services.export_service import (
+    build_export_request_params,
+    validate_export_request_params,
+)
 
 from datetime import datetime
 
@@ -2384,17 +2387,21 @@ async def export(
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
 
-    if not q:
-        raise HTTPException(400, "Query is empty")
-    if source not in ALLOWED_SOURCES:
-        raise HTTPException(422, f"Unknown source: {source}")
-
-    bulk_limit = min(max(1, int(bulk_limit)), EXPORT_HARD_CAP)
+    try:
+        bulk_limit = validate_export_request_params(
+            export_params,
+            allowed_sources=ALLOWED_SOURCES,
+            export_hard_cap=EXPORT_HARD_CAP,
+        )
+    except ValueError as e:
+        message = str(e)
+        if message == "Query is empty":
+            raise HTTPException(400, message)
+        raise HTTPException(422, message)
 
     redis = getattr(request.app.state, "redis", None)
 
     papers: list[Paper] = []
-
 
     # ALL SOURCES
     if source == "all":
