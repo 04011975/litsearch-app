@@ -2020,8 +2020,8 @@ async def search(
     requested_page = max(1, int(page))
     retstart_req = (requested_page - 1) * int(n)    
 
-    logger.info(
-        "PUBMED SEARCH DEBUG term=%r ui_sort=%r pubmed_sort=%r mesh=%r mesh_mode=%r page=%s retstart=%s n=%s",
+    logger.debug(
+        "PUBMED SEARCH term=%r ui_sort=%r pubmed_sort=%r mesh=%r mesh_mode=%r page=%s retstart=%s n=%s",
         term,
         ui_sort,
         pubmed_sort,
