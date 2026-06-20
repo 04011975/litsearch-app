@@ -521,8 +521,8 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
         return []
     papers: list[Paper] = []
     records = list(root.findall(".//PubmedArticle")) + list(root.findall(".//PubmedBookArticle"))
-    logger.info(
-        "PUBMED XML RECORD DEBUG pubmed_articles=%s pubmed_book_articles=%s",
+    logger.debug(
+        "PUBMED XML RECORD pubmed_articles=%s pubmed_book_articles=%s",
         len(root.findall(".//PubmedArticle")),
         len(root.findall(".//PubmedBookArticle")),
     )
@@ -581,8 +581,8 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
                 t = (mh.text or "").strip()
                 if t:
                     mesh_terms.append(t)
-            logger.info(
-                "PUBMED RECORD DEBUG pmid=%s title=%r pubdate=%r year=%r",
+            logger.debug(
+                "PUBMED RECORD pmid=%s title=%r pubdate=%r year=%r",
                 pmid,
                 title[:80],
                 pubdate,
@@ -595,8 +595,8 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
                 "Medical Genetics Summaries",
                 "ASTP Health IT Data Brief",
             }:
-                logger.warning(
-                    "BOOK-LIKE RECORD DEBUG pmid=%s title=%r journal=%r pubdate=%r year=%r",
+                logger.debug(
+                    "BOOK-LIKE RECORD pmid=%s title=%r journal=%r pubdate=%r year=%r",
                     pmid,
                     title[:80],
                     journal,
@@ -721,8 +721,8 @@ async def pubmed_fetch_details(
                 params["email"] = email
             xml_text = await _get_text_with_retry(client, url, params)
             parsed = _parse_pubmed_article_xml(xml_text)
-            logger.warning(
-                "PUBMED EFETCH BATCH DEBUG requested=%s parsed=%s batch_pmids=%r",
+            logger.debug(
+                "PUBMED EFETCH BATCH requested=%s parsed=%s batch_pmids=%r",
                 len(batch_pmids),
                 len(parsed),
                 batch_pmids,

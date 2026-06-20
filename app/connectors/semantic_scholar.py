@@ -64,8 +64,7 @@ def _headers() -> dict[str, str]:
     }
     api_key = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
 
-    # tijdelijk handig voor debuggen; later evt. verwijderen of debug-level maken
-    logger.info("Semantic Scholar API key configured=%s", bool(api_key))
+    logger.debug("Semantic Scholar API key configured=%s", bool(api_key))
 
     if api_key:
         headers["x-api-key"] = api_key
