@@ -2392,7 +2392,9 @@ async def export(
             export_params,
             allowed_sources=ALLOWED_SOURCES,
             export_hard_cap=EXPORT_HARD_CAP,
+            safe_int=_safe_int,
         )
+
     except ValueError as e:
         message = str(e)
         if message == "Query is empty":

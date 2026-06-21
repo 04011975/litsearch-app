@@ -70,11 +70,18 @@ def validate_export_request_params(
     *,
     allowed_sources: set[str],
     export_hard_cap: int,
+    safe_int,
 ) -> int:
     if not params.q:
         raise ValueError("Query is empty")
 
     if params.source not in allowed_sources:
         raise ValueError(f"Unknown source: {params.source}")
+
+    year_min_i = safe_int(params.year_min, None)
+    year_max_i = safe_int(params.year_max, None)
+
+    if year_min_i is not None and year_max_i is not None and year_min_i > year_max_i:
+        raise ValueError("year_min must be <= year_max")
 
     return min(max(1, int(params.bulk_limit)), int(export_hard_cap))
