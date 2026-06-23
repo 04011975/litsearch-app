@@ -92,8 +92,24 @@ Recommendation:
 ## Recommended next refactor order
 
 1. Continue export-service extraction
+
 2. Extract paper detail routes
+
+   Status: Reviewed
+
+   Findings:
+
+   - paper_detail() is largely self-contained
+   - legacy redirect routes are self-contained
+   - primary dependency is _fetch_detail_by_source()
+   - route extraction appears low risk
+
+   Recommendation:
+
+   Move paper detail routes after export route extraction is completed.
+
 3. Review Europe PMC helper placement
+
 4. Decompose `search()` last
 
 ## Conclusion
