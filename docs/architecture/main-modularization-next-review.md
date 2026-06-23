@@ -110,6 +110,25 @@ Recommendation:
 
 3. Review Europe PMC helper placement
 
+Status: Reviewed
+
+Findings:
+
+- Europe PMC cursor caching helpers form a coherent subsystem
+- Cursor cache helpers are tightly coupled to epmc_tasks.py
+- _europe_pmc_search_compat_async() is a service-style adapter
+- Main Europe PMC search flow remains route-level logic
+
+Recommendation:
+
+Do not move Europe PMC search routing yet.
+
+Future extraction candidates:
+
+- cursor cache helpers
+- cursor build helpers
+- Europe PMC search adapter
+
 4. Decompose `search()` last
 
 ## Conclusion
