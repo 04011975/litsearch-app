@@ -51,6 +51,8 @@ from app.specializations import get_source_info
 
 from app.core.deduplication import deduplicate_papers
 
+from app.routes.paper_routes import router as paper_router
+
 from app.services.export_service import (
     build_export_request_params,
     validate_export_request_params,
@@ -180,6 +182,8 @@ logging.basicConfig(
 logger = logging.getLogger("litsearch.main")
 
 app = FastAPI(title="LitSearch", version=APP_VERSION)
+
+app.include_router(paper_router)
 
 
 # =========================================================
@@ -2158,21 +2162,6 @@ async def paper_detail(request: Request, source: str, pid: str):
             "source": source,
         },
     )
-
-
-@app.get("/paper/{pmid}", include_in_schema=False)
-async def legacy_pubmed_detail(pmid: str):
-    return RedirectResponse(url=f"/paper/pubmed/{pmid}")
-
-
-@app.get("/paper/europe_pmc/{pid}", include_in_schema=False)
-async def legacy_epmc_detail(pid: str):
-    return RedirectResponse(url=f"/paper/europe_pmc/{pid}")
-
-@app.get("/paper/semantic_scholar/{pid}", include_in_schema=False)
-async def legacy_semantic_scholar_detail(pid: str):
-    return RedirectResponse(url=f"/paper/semantic_scholar/{pid}")
-
 
 # =========================================================
 # Async export (ARQ job + download) - unchanged interface
