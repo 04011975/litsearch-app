@@ -470,20 +470,6 @@ def _europe_pmc_external_url(p: Any) -> str:
 # Sorting (UI -> canonical; per-source mapping)
 # -------------------------
 
-def _normalize_sort(sort: str | None) -> str:
-    return normalize_all_sources_sort(sort)
-
-def _pubmed_sort(ui_sort: str) -> str:
-    return all_sources_pubmed_sort(ui_sort)
-
-
-def _openalex_sort(ui_sort: str) -> str:
-    return all_sources_openalex_sort(ui_sort)
-
-
-def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
-    return all_sources_semantic_scholar_sort_mode(ui_sort)
-
 def _paper_year_value(p: dict[str, Any] | Paper) -> int:
     if isinstance(p, dict):
         value = p.get("year") or p.get("publication_date")
@@ -529,7 +515,7 @@ def _sort_papers_for_ui(
     sort: str,
     q: str = "",
 ) -> list[dict[str, Any]]:
-    ui_sort = _normalize_sort(sort)
+    ui_sort = normalize_all_sources_sort(sort)
 
     if ui_sort == "relevance":
         return papers
@@ -1112,7 +1098,7 @@ async def search(
     # --------------------------
     q = (q or "").strip()
     mesh = _normalize_mesh(mesh)
-    ui_sort = _normalize_sort(sort)
+    ui_sort = normalize_all_sources_sort(sort)
 
     warning: str | None = None
 
@@ -1127,9 +1113,9 @@ async def search(
         warning = "PubMed API currently supports newest-first publication date sorting, but not oldest-first sorting in this integration."
         ui_sort = "relevance"
 
-    pubmed_sort = _pubmed_sort(ui_sort)
-    openalex_sort = _openalex_sort(ui_sort)
-    ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
+    pubmed_sort = all_sources_pubmed_sort(ui_sort)
+    openalex_sort = all_sources_openalex_sort(ui_sort)
+    ss_mode, ss_api_sort = all_sources_semantic_scholar_sort_mode(ui_sort)
     epmc_sort = ui_sort
 
 
@@ -2223,7 +2209,7 @@ async def create_export_job(
     limit = min(int(limit), EXPORT_HARD_CAP)
     n = max(1, min(int(n), 50))
 
-    ui_sort = _normalize_sort(sort)
+    ui_sort = normalize_all_sources_sort(sort)
     mesh_norm = _normalize_mesh(mesh or "")
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
@@ -2359,7 +2345,7 @@ async def export(
         fmt=fmt,
         scope=scope,
         bulk_limit=bulk_limit,
-        normalize_sort=_normalize_sort,
+        normalize_sort=normalize_all_sources_sort,
         normalize_mesh=_normalize_mesh,
         safe_int=_safe_int,
     )
@@ -2379,10 +2365,10 @@ async def export(
     if source == "europe_pmc" and ui_sort != "relevance":
         ui_sort = "relevance"
 
-    pubmed_sort = _pubmed_sort(ui_sort)
-    openalex_sort = _openalex_sort(ui_sort)
+    pubmed_sort = all_sources_pubmed_sort(ui_sort)
+    openalex_sort = all_sources_openalex_sort(ui_sort)
     epmc_sort = ui_sort
-    ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
+    ss_mode, ss_api_sort = all_sources_semantic_scholar_sort_mode(ui_sort)
 
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)

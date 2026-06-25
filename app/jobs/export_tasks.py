@@ -214,18 +214,6 @@ def _cache_key(prefix: str, payload: dict) -> str:
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return f"{prefix}:{digest}"
 
-
-def _pubmed_sort(ui_sort: str) -> str:
-    return all_sources_pubmed_sort(ui_sort)
-
-
-def _openalex_sort(ui_sort: str) -> str:
-    return all_sources_openalex_sort(ui_sort)
-
-
-def _semantic_scholar_sort_mode(ui_sort: str) -> tuple[str, str]:
-    return all_sources_semantic_scholar_sort_mode(ui_sort)
-
 def _resolve_export_sources(source: str) -> list[str]:
 
     if source == "all":
@@ -235,10 +223,6 @@ def _resolve_export_sources(source: str) -> list[str]:
         return [source]
 
     raise RuntimeError(f"Unsupported source: {source}")
-
-
-def _normalize_sort(sort: str | None) -> str:
-    return normalize_all_sources_sort(sort)
 
 async def _cache_get_json(r: ArqRedis, key: str) -> Optional[dict]:
     v = await r.get(key)
@@ -564,7 +548,7 @@ def _sort_papers_for_export(
     sort: str,
     q: str = "",
 ) -> list[Paper]:
-    s = _normalize_sort(sort)
+    s = normalize_all_sources_sort(sort)
 
     if s == "date_desc":
         return sorted(papers, key=_paper_date_sort_key, reverse=True)
@@ -711,7 +695,7 @@ async def _fetch_openalex_export_records(
     effective_cap = min(OPENALEX_BASIC_PAGING_LIMIT, limit)
     max_pages = max(1, math.ceil(effective_cap / per_page))
 
-    openalex_sort = _openalex_sort(sort)
+    openalex_sort = all_sources_openalex_sort(sort)
 
     filters_payload = {
         "q": q,
@@ -1191,7 +1175,7 @@ async def _fetch_pubmed_export_records(
         mesh_mode = "or"
 
     ui_sort = (meta.get("sort") or "relevance").strip().lower()
-    pubmed_sort = _pubmed_sort(ui_sort)
+    pubmed_sort = all_sources_pubmed_sort(ui_sort)
 
     term = build_pubmed_term(
         q,
@@ -1601,8 +1585,8 @@ async def _fetch_semantic_scholar_export_records(
     ss_effective_limit = limit
     ss_next_token_present: bool | None = None
 
-    ui_sort = _normalize_sort(sort)
-    ss_mode, ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
+    ui_sort = normalize_all_sources_sort(sort)
+    ss_mode, ss_api_sort = all_sources_semantic_scholar_sort_mode(ui_sort)
 
     seen_ids: set[str] = set()
 
@@ -2136,8 +2120,8 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         elif source == "pubmed":
             job_batch_size = get_export_batch_size("pubmed")
         elif source == "semantic_scholar":
-            ui_sort = _normalize_sort(sort)
-            ss_mode, _ss_api_sort = _semantic_scholar_sort_mode(ui_sort)
+            ui_sort = normalize_all_sources_sort(sort)
+            ss_mode, _ss_api_sort = all_sources_semantic_scholar_sort_mode(ui_sort)
             if ss_mode == "bulk":
                 job_batch_size = get_export_batch_size("semantic_scholar_bulk")
 
