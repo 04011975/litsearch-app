@@ -51,6 +51,8 @@ from app.specializations import get_source_info
 
 from app.core.deduplication import deduplicate_papers
 
+from app.routes.paper_routes import router as paper_router
+
 from app.services.export_service import (
     build_export_request_params,
     validate_export_request_params,
@@ -180,6 +182,8 @@ logging.basicConfig(
 logger = logging.getLogger("litsearch.main")
 
 app = FastAPI(title="LitSearch", version=APP_VERSION)
+
+app.include_router(paper_router)
 
 
 # =========================================================
