@@ -1034,6 +1034,13 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
         return await _run_sync(fetch_semantic_scholar_detail, pid)
     return None
 
+    app.state.allowed_sources = ALLOWED_SOURCES
+    app.state.fetch_detail_by_source = _fetch_detail_by_source
+    app.state.paper_to_dict = _paper_to_dict
+    app.state.pubmed_external_url = _pubmed_external_url
+    app.state.europe_pmc_external_url = _europe_pmc_external_url
+    app.state.templates = templates
+
     
 # =========================================================
 # Routes
@@ -2131,33 +2138,6 @@ async def search(
 
     return templates.TemplateResponse("results.html", ctx)
 
-@app.get("/paper/{source}/{pid}", response_class=HTMLResponse)
-async def paper_detail(request: Request, source: str, pid: str):
-    if source not in ALLOWED_SOURCES:
-        raise HTTPException(status_code=404, detail="Not Found")
-
-    paper = await _fetch_detail_by_source(source, pid)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Not Found")
-
-    d = build_paper_detail_dict(
-        paper,
-        source=source,
-        pid=pid,
-        paper_to_dict=_paper_to_dict,
-        pubmed_external_url=_pubmed_external_url,
-        europe_pmc_external_url=_europe_pmc_external_url,
-    )
-    return templates.TemplateResponse(
-        "paper.html",
-        {
-            "request": request,
-            "pid": pid,
-            "paper": d,
-            "error": None,
-            "source": source,
-        },
-    )
 
 # =========================================================
 # Async export (ARQ job + download) - unchanged interface
