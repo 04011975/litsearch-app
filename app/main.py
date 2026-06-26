@@ -185,9 +185,6 @@ logger = logging.getLogger("litsearch.main")
 
 app = FastAPI(title="LitSearch", version=APP_VERSION)
 
-app.include_router(paper_router)
-
-
 # =========================================================
 # Source configuration
 # =========================================================
@@ -1041,7 +1038,8 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
     app.state.europe_pmc_external_url = _europe_pmc_external_url
     app.state.templates = templates
 
-    
+    app.include_router(paper_router)
+
 # =========================================================
 # Routes
 # =========================================================
