@@ -1031,14 +1031,14 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
         return await _run_sync(fetch_semantic_scholar_detail, pid)
     return None
 
-    app.state.allowed_sources = ALLOWED_SOURCES
-    app.state.fetch_detail_by_source = _fetch_detail_by_source
-    app.state.paper_to_dict = _paper_to_dict
-    app.state.pubmed_external_url = _pubmed_external_url
-    app.state.europe_pmc_external_url = _europe_pmc_external_url
-    app.state.templates = templates
+app.state.allowed_sources = ALLOWED_SOURCES
+app.state.fetch_detail_by_source = _fetch_detail_by_source
+app.state.paper_to_dict = _paper_to_dict
+app.state.pubmed_external_url = _pubmed_external_url
+app.state.europe_pmc_external_url = _europe_pmc_external_url
+app.state.templates = templates
 
-    app.include_router(paper_router)
+app.include_router(paper_router)
 
 # =========================================================
 # Routes
