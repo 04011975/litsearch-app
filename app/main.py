@@ -75,6 +75,8 @@ from app.all_sources import (
 
 from contextlib import asynccontextmanager
 
+from copy import copy
+
 # =========================================================
 # Small helpers
 # =========================================================
@@ -713,7 +715,9 @@ def _papers_to_xlsx_bytes(papers: List[Paper]) -> bytes:
 
     # header vet
     for cell in ws[1]:
-        cell.font = cell.font.copy(bold=True)
+        font = copy(cell.font)
+        font.bold = True
+        cell.font = font
 
     buf = io.BytesIO()
     wb.save(buf)
