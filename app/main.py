@@ -73,6 +73,8 @@ from app.all_sources import (
     all_sources_semantic_scholar_sort_mode,
 )
 
+from contextlib import asynccontextmanager
+
 # =========================================================
 # Small helpers
 # =========================================================
@@ -183,7 +185,54 @@ logging.basicConfig(
 
 logger = logging.getLogger("litsearch.main")
 
-app = FastAPI(title="LitSearch", version=APP_VERSION)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global ARQ_REDIS, _redis
+
+    app.state.redis = make_redis()
+    _redis = _redis_client()
+
+    if REDIS_URL:
+        try:
+            ARQ_REDIS = await create_pool(RedisSettings.from_dsn(REDIS_URL))
+        except Exception:
+            logger.exception("Failed creating ARQ redis pool")
+            ARQ_REDIS = None
+
+    try:
+        os.makedirs(EXPORT_DIR, exist_ok=True)
+    except Exception:
+        logger.exception("Failed to create export dir: %s", EXPORT_DIR)
+
+    try:
+        yield
+    finally:
+        try:
+            r = getattr(app.state, "redis", None)
+            if r is not None:
+                await r.close()
+                try:
+                    await r.connection_pool.disconnect(inuse_connections=True)
+                except TypeError:
+                    await r.connection_pool.disconnect()
+        except Exception:
+            logger.exception("Failed closing app.state.redis")
+
+        try:
+            if ARQ_REDIS is not None:
+                await ARQ_REDIS.close()
+        except Exception:
+            logger.exception("Failed closing ARQ_REDIS")
+        ARQ_REDIS = None
+
+        try:
+            if _redis is not None:
+                _redis.close()
+        except Exception:
+            logger.exception("Failed closing sync redis")
+        _redis = None
+
+app = FastAPI(title="LitSearch", version=APP_VERSION, lifespan=lifespan)
 
 # =========================================================
 # Source configuration
@@ -289,62 +338,6 @@ def _redis_client() -> redis_sync.Redis | None:
     except Exception:
         logger.exception("Sync Redis not available (continuing without cursor cache)")
         return None
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    global ARQ_REDIS, _redis
-
-    # async redis (rate limiting + json cache)
-    app.state.redis = make_redis()
-
-    # sync redis for EPMC cursor hash cache
-    _redis = _redis_client()
-
-    # ARQ pool
-    if REDIS_URL:
-        try:
-            ARQ_REDIS = await create_pool(RedisSettings.from_dsn(REDIS_URL))
-        except Exception:
-            logger.exception("Failed creating ARQ redis pool")
-            ARQ_REDIS = None
-
-    try:
-        os.makedirs(EXPORT_DIR, exist_ok=True)
-    except Exception:
-        logger.exception("Failed to create export dir: %s", EXPORT_DIR)
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    global ARQ_REDIS, _redis
-
-    # close async redis
-    try:
-        r = getattr(app.state, "redis", None)
-        if r is not None:
-            await r.close()
-            try:
-                await r.connection_pool.disconnect(inuse_connections=True)
-            except TypeError:
-                await r.connection_pool.disconnect()
-    except Exception:
-        logger.exception("Failed closing app.state.redis")
-
-    # close ARQ
-    try:
-        if ARQ_REDIS is not None:
-            await ARQ_REDIS.close()
-    except Exception:
-        logger.exception("Failed closing ARQ_REDIS")
-    ARQ_REDIS = None
-
-    # close sync redis
-    try:
-        if _redis is not None:
-            _redis.close()
-    except Exception:
-        logger.exception("Failed closing sync redis")
 
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
