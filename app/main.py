@@ -1220,7 +1220,7 @@ async def search(
             "last_url": last_url,
         })
 
-        return templates.TemplateResponse("results.html", ctx)
+        return templates.TemplateResponse(request, "results.html", ctx)
         
 
     # --------------------------
@@ -1249,8 +1249,7 @@ async def search(
                 "epmc_export_url_ris": None,
                 "epmc_building": False,
             })
-            return templates.TemplateResponse("results.html", ctx)
-
+            return templates.TemplateResponse(request, "results.html", ctx)
         year_min_i = _safe_int(year_min, None)
         year_max_i = _safe_int(year_max, None)
         has_abs_i = int(has_abstract or 0)
@@ -1326,7 +1325,7 @@ async def search(
                         "epmc_building": False,
                     }
                 )
-                return templates.TemplateResponse("results.html", ctx)
+                return templates.TemplateResponse(request, "results.html", ctx)
 
             await _epmc_enqueue_build(
                 q,
@@ -1407,7 +1406,7 @@ async def search(
                     "auto_refresh_seconds": 2,
                 }
             )
-            return templates.TemplateResponse("results.html", ctx)
+            return templates.TemplateResponse(request, "results.html", ctx)
 
         want_end = in_chunk_offset + int(n)
         to_collect = min(EPMC_CHUNK_SIZE, max(want_end, EPMC_PAGE_CAP))
@@ -1615,7 +1614,7 @@ async def search(
             "epmc_export_url_csv": epmc_export_url_csv,
             "epmc_export_url_ris": epmc_export_url_ris,
         })
-        return templates.TemplateResponse("results.html", ctx)
+        return templates.TemplateResponse(request, "results.html", ctx)
 
 
     # --------------------------
@@ -1651,7 +1650,7 @@ async def search(
                 "next_url": None,
                 "last_url": None,
             })
-            return templates.TemplateResponse("results.html", ctx)
+            return templates.TemplateResponse(request, "results.html", ctx)
 
         redis = getattr(request.app.state, "redis", None)
         tenant_id = _tenant_id(request)
@@ -1684,7 +1683,7 @@ async def search(
             ctx.update({"papers": [], "mesh_suggestions": [], "total_count": 0, "total_pages": 1,
                         "error": None, "warning": "OpenAlex rate limit reached. Please retry shortly.",
                         "next_url": None, "last_url": None})
-            return templates.TemplateResponse("results.html", ctx)
+            return templates.TemplateResponse(request, "results.html", ctx)
 
         per_page = max(1, int(n))
         fetch_n = per_page
@@ -1795,7 +1794,7 @@ async def search(
             "next_url": next_url,
             "last_url": last_url,
         })
-        return templates.TemplateResponse("results.html", ctx)
+        return templates.TemplateResponse(request, "results.html", ctx)
 
 
     # --------------------------
@@ -1865,7 +1864,7 @@ async def search(
                 "last_url": None,
             })
 
-            return templates.TemplateResponse("results.html", ctx)
+            return templates.TemplateResponse(request, "results.html", ctx)
 
         papers = [
             _paper_to_dict(p, source="semantic_scholar")
@@ -1950,7 +1949,7 @@ async def search(
             "last_url": last_url,
         })
 
-        return templates.TemplateResponse("results.html", ctx)
+        return templates.TemplateResponse(request, "results.html", ctx)
 
 
     # --------------------------
@@ -2012,7 +2011,7 @@ async def search(
             "next_url": None,
             "last_url": None,
         })
-        return templates.TemplateResponse("results.html", ctx)
+        return templates.TemplateResponse(request, "results.html", ctx)
 
     requested_page = max(1, int(page))
     retstart_req = (requested_page - 1) * int(n)    
@@ -2134,7 +2133,7 @@ async def search(
         "last_url": last_url,
     })
 
-    return templates.TemplateResponse("results.html", ctx)
+    return templates.TemplateResponse(request, "results.html", ctx)
 
 
 # =========================================================
