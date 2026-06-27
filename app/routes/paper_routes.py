@@ -31,6 +31,7 @@ async def paper_detail(request: Request, source: str, pid: str):
     )
 
     return state.templates.TemplateResponse(
+        request,
         "paper.html",
         {
             "request": request,
