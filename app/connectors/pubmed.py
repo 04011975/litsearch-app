@@ -640,7 +640,7 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
 # Performance tuning knobs
 # =========================
 
-EFETCH_BATCH_SIZE = 20
+EFETCH_BATCH_SIZE = 50
 EFETCH_MAX_CONCURRENCY = 3
 EFETCH_DELAY_SECONDS = 0.34
 EFETCH_MAX_RETRIES = 4
