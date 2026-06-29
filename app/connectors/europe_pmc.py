@@ -19,6 +19,7 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 TOOL_NAME = os.getenv("TOOL_NAME", "LitSearch")
 CONTACT_EMAIL = (os.getenv("CONTACT_EMAIL") or "").strip()
 USER_AGENT = f"{TOOL_NAME}/0.1" + (f" (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else "")
+_session = requests.Session()
 
 DEFAULT_RESULT_TYPE = "core"
 MAX_PAGE_SIZE = 1000
@@ -231,7 +232,7 @@ def europe_pmc_search(
                 retries + 1,
             )
 
-            r = requests.get(
+            r = _session.get(
                 EUROPE_PMC_SEARCH_URL,
                 params=params,
                 headers=headers,
