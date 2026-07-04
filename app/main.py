@@ -34,6 +34,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.connectors.europe_pmc import europe_pmc_fetch_detail, europe_pmc_search, EuropePmcTemporaryError
 from app.connectors.openalex import openalex_fetch_detail, openalex_search
+from app.connectors.crossref import crossref_fetch_detail, crossref_search
 from app.connectors.pubmed import build_pubmed_term, pubmed_fetch_details, pubmed_search_page
 
 from app.connectors.semantic_scholar import (
@@ -158,7 +159,7 @@ OPENALEX_TENANT_RPM = 60
 OPENALEX_GLOBAL_RPM = 600
 SEMANTIC_SCHOLAR_CACHE_TTL_S = 600
 
-ALLOWED_SOURCES = {"pubmed", "europe_pmc", "openalex", "semantic_scholar", "all"}
+ALLOWED_SOURCES = {"pubmed", "europe_pmc", "openalex", "semantic_scholar", "crossref", "all"}
 SOURCE_PATTERN = "^(" + "|".join(ALLOWED_SOURCES) + ")$"
 
 if not CONTACT_EMAIL:
@@ -166,7 +167,7 @@ if not CONTACT_EMAIL:
         "⚠️ WARNING: CONTACT_EMAIL is not set. "
         "NCBI strongly recommends providing a contact email for PubMed API usage."
     )
-    
+
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -285,6 +286,22 @@ SOURCE_SPECIALIZATIONS = {
         "limitations": [
             "abstract coverage varies",
             "basic pagination limits",
+        ],
+    },
+
+    "crossref": {
+        "label": "Crossref",
+        "role": "Scholarly metadata and DOI registry",
+        "specialization": "Cross-disciplinary scholarly metadata with strong DOI coverage.",
+        "search_mode": "Keyword-based metadata search; MeSH filtering is not available for this source.",
+        "strengths": [
+            "strong DOI coverage",
+            "broad publisher metadata",
+            "cross-disciplinary coverage",
+        ],
+        "limitations": [
+            "abstract coverage varies",
+            "metadata quality depends on publisher deposits",
         ],
     },
 
@@ -1024,6 +1041,13 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
                 return p
         return None
 
+    if source == "crossref":
+        try:
+            return await _run_sync(crossref_fetch_detail, pid)
+        except Exception:
+            logger.exception("Crossref detail failed pid=%s", pid)
+            return None
+
     elif source == "semantic_scholar":
         return await _run_sync(fetch_semantic_scholar_detail, pid)
     return None
@@ -1060,7 +1084,7 @@ if DEBUG_ENDPOINTS:
             "next_cursor": next_cursor,
             "titles": [getattr(p, "title", "") for p in papers[:3]],
         }
-    
+
 
 @app.get("/health", include_in_schema=False)
 def health():
@@ -1218,7 +1242,7 @@ async def search(
         })
 
         return templates.TemplateResponse(request, "results.html", ctx)
-        
+
 
     # --------------------------
     # EUROPE PMC (cursor paging + deep paging via Redis/ARQ)
@@ -1263,7 +1287,7 @@ async def search(
             year_min_i,
             year_max_i,
             has_abs_i,
-        )        
+        )
 
         cursor_req = (request.query_params.get("cursor") or "").strip() or None
         cursor_used = cursor_req
@@ -1486,7 +1510,7 @@ async def search(
             page_i,
             len(papers),
             total_count,
-        )        
+        )
 
         if epmc_temp_warning:
             warning = epmc_temp_warning
@@ -1626,8 +1650,8 @@ async def search(
             ui_sort,
             year_min,
             year_max,
-        ) 
-                              
+        )
+
         if not q:
             ctx = _template_base_context(
                 request, q=q, source="openalex", n=n, page=1, sort=ui_sort,
@@ -1667,7 +1691,7 @@ async def search(
                 OPENALEX_GLOBAL_RPM,
                 60,
             )
-        
+
         if not (ok_tenant and ok_global):
             ctx = _template_base_context(
                 request, q=q, source="openalex", n=n, page=1, sort=ui_sort,
@@ -1738,7 +1762,7 @@ async def search(
             "OPENALEX cache page_hit=%s meta_hit=%s",
             bool(cached_page),
             bool(cached_meta),
-        )       
+        )
 
         if cached_page and isinstance(cached_page.get("papers"), list):
             oa_papers = [Paper.from_dict(d) for d in cached_page["papers"] if isinstance(d, dict)]
@@ -1793,6 +1817,95 @@ async def search(
         })
         return templates.TemplateResponse(request, "results.html", ctx)
 
+    # --------------------------
+    # CROSSREF
+    # --------------------------
+    if source == "crossref":
+        logger.info(
+            "CROSSREF SEARCH request q=%r page=%s n=%s sort=%s year_min=%r year_max=%r",
+            q,
+            page,
+            n,
+            ui_sort,
+            year_min,
+            year_max,
+        )
+
+        if not q:
+            ctx = _template_base_context(
+                request, q=q, source="crossref", n=n, page=1, sort=ui_sort,
+                year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+            )
+            ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+            ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+            ctx.update({
+                "papers": [],
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": 0,
+                "total_pages": 1,
+                "error": None,
+                "warning": None,
+                "next_url": None,
+                "last_url": None,
+            })
+            return templates.TemplateResponse(request, "results.html", ctx)
+
+        per_page = max(1, int(n))
+        page_i = max(1, int(page))
+
+        year_min_i = _safe_int(year_min, None)
+        year_max_i = _safe_int(year_max, None)
+
+        crossref_papers, total_count = await _run_sync(
+            crossref_search,
+            q,
+            page=page_i,
+            n=per_page,
+            sort=ui_sort,
+            year_min=year_min_i,
+            year_max=year_max_i,
+        )
+
+        papers = [_paper_to_dict(p, source="crossref") for p in (crossref_papers or [])]
+        papers = papers[:per_page]
+
+        total_pages = max(1, math.ceil(max(0, int(total_count or 0)) / per_page))
+
+        base_params = {
+            "q": q,
+            "source": "crossref",
+            "n": n,
+            "sort": ui_sort,
+            "year_min": year_min,
+            "year_max": year_max,
+            "has_abstract": has_abstract,
+            "mesh": mesh,
+        }
+
+        next_url = _build_url("/search", {**base_params, "page": page_i + 1}) if page_i < total_pages else None
+        last_url = _build_url("/search", {**base_params, "page": total_pages}) if total_pages > 1 else None
+
+        ctx = _template_base_context(
+            request, q=q, source="crossref", n=n, page=page_i, sort=ui_sort,
+            year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+        )
+
+        ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+        ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+
+        ctx.update({
+            "papers": papers,
+            "mesh_suggestions": [],
+            "concept_suggestions": [],
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "error": None,
+            "warning": warning,
+            "next_url": next_url,
+            "last_url": last_url,
+        })
+        return templates.TemplateResponse(request, "results.html", ctx)
 
     # --------------------------
     # SEMANTIC SCHOLAR
@@ -2011,7 +2124,7 @@ async def search(
         return templates.TemplateResponse(request, "results.html", ctx)
 
     requested_page = max(1, int(page))
-    retstart_req = (requested_page - 1) * int(n)    
+    retstart_req = (requested_page - 1) * int(n)
 
     logger.debug(
         "PUBMED SEARCH term=%r ui_sort=%r pubmed_sort=%r mesh=%r mesh_mode=%r page=%s retstart=%s n=%s",
@@ -2085,7 +2198,7 @@ async def search(
         len(papers_dicts),
         total_count,
         is_capped,
-    )       
+    )
 
     base_params = {
         "q": q,
@@ -2141,7 +2254,7 @@ async def search(
 async def create_export_job(
     request: Request,
     q: str = Query(..., min_length=1),
-    source: str = Query("pubmed", pattern="^(pubmed|europe_pmc|openalex|semantic_scholar|all)$"),
+    source: str = Query("pubmed", pattern=SOURCE_PATTERN),
     n: int = Query(10, ge=1, le=50),
     sort: str = Query("relevance"),
     fmt: str = Query(..., pattern="^(csv|ris|xlsx)$"),
@@ -2565,6 +2678,44 @@ async def export(
             )
             papers = ep_papers or []
 
+    # CROSSREF
+    elif source == "crossref":
+        if scope == "bulk":
+            out: list[Paper] = []
+            page_i = 1
+
+            while len(out) < bulk_limit:
+                step = min(100, bulk_limit - len(out))
+                batch, _total = await _run_sync(
+                    crossref_search,
+                    q,
+                    page=page_i,
+                    n=step,
+                    sort=ui_sort,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                )
+
+                if not batch:
+                    break
+
+                out.extend(batch)
+                page_i += 1
+
+            papers = out[:bulk_limit]
+
+        else:
+            papers, _total = await _run_sync(
+                crossref_search,
+                q,
+                page=page,
+                n=n,
+                sort=ui_sort,
+                year_min=year_min_i,
+                year_max=year_max_i,
+            )
+            papers = papers or []
+
     # SEMANTIC SCHOLAR
     elif source == "semantic_scholar":
         has_abstract_flag = str(has_abstract).strip().lower() in {"1", "true", "yes", "on"}
@@ -2757,7 +2908,7 @@ async def export(
                 status_code=503,
                 detail=str(e),
             ) from e
-        
+
     if fmt == "csv":
         content = _papers_to_csv(papers)
         return Response(

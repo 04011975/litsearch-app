@@ -22,6 +22,7 @@ from app.connectors.pubmed import (
     pubmed_search_page,
 )
 from app.connectors.openalex import openalex_search
+from app.connectors.crossref import crossref_search
 from app.connectors.europe_pmc import europe_pmc_search
 from app.connectors.semantic_scholar import (
     search_semantic_scholar,
@@ -279,6 +280,45 @@ async def fetch_all_source_candidates(
             logger.exception("ALL: openalex failed")
             return {"source": source, "papers": [], "count": 0, "failed": True}
 
+    async def _fetch_crossref() -> dict[str, Any]:
+        started = time.perf_counter()
+        source = "crossref"
+
+        try:
+            papers, _ = await asyncio.to_thread(
+                crossref_search,
+                q,
+                page=1,
+                n=candidate_n,
+                sort="relevance",
+                year_min=year_min,
+                year_max=year_max,
+            )
+
+            for p in papers or []:
+                try:
+                    p.source = source
+                except Exception:
+                    pass
+
+            logger.info(
+                "ALL PERF source=%s count=%s elapsed_ms=%s",
+                source,
+                len(papers or []),
+                _elapsed_ms(started),
+            )
+
+            return {
+                "source": source,
+                "papers": papers or [],
+                "count": len(papers or []),
+                "failed": False,
+            }
+
+        except Exception:
+            logger.exception("ALL: crossref failed")
+            return {"source": source, "papers": [], "count": 0, "failed": True}
+
     async def _fetch_europe_pmc() -> dict[str, Any]:
         started = time.perf_counter()
         source = "europe_pmc"
@@ -359,6 +399,7 @@ async def fetch_all_source_candidates(
     results = await asyncio.gather(
         _fetch_pubmed(),
         _fetch_openalex(),
+        _fetch_crossref(),
         _fetch_europe_pmc(),
         _fetch_semantic_scholar(),
     )
@@ -368,6 +409,7 @@ async def fetch_all_source_candidates(
     source_order = [
         "pubmed",
         "openalex",
+        "crossref",
         "europe_pmc",
         "semantic_scholar",
     ]
@@ -411,7 +453,7 @@ async def build_all_source_results(
     """
 
     total_started = time.perf_counter()
-    
+
     normalized_sort = normalize_all_sources_sort(sort)
 
     candidate_n = max(int(limit or n), ALL_SOURCES_CANDIDATE_LIMIT)
