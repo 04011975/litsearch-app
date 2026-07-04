@@ -10,7 +10,7 @@ from app.services.paper_service import build_paper_detail_dict
 router = APIRouter()
 
 
-@router.get("/paper/{source}/{pid}", response_class=HTMLResponse)
+@router.get("/paper/{source}/{pid:path}", response_class=HTMLResponse)
 async def paper_detail(request: Request, source: str, pid: str):
     state = request.app.state
 
