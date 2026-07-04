@@ -2678,6 +2678,44 @@ async def export(
             )
             papers = ep_papers or []
 
+    # CROSSREF
+    elif source == "crossref":
+        if scope == "bulk":
+            out: list[Paper] = []
+            page_i = 1
+
+            while len(out) < bulk_limit:
+                step = min(100, bulk_limit - len(out))
+                batch, _total = await _run_sync(
+                    crossref_search,
+                    q,
+                    page=page_i,
+                    n=step,
+                    sort=ui_sort,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                )
+
+                if not batch:
+                    break
+
+                out.extend(batch)
+                page_i += 1
+
+            papers = out[:bulk_limit]
+
+        else:
+            papers, _total = await _run_sync(
+                crossref_search,
+                q,
+                page=page,
+                n=n,
+                sort=ui_sort,
+                year_min=year_min_i,
+                year_max=year_max_i,
+            )
+            papers = papers or []
+
     # SEMANTIC SCHOLAR
     elif source == "semantic_scholar":
         has_abstract_flag = str(has_abstract).strip().lower() in {"1", "true", "yes", "on"}
