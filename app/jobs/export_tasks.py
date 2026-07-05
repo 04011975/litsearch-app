@@ -36,6 +36,7 @@ from app.core.export_logging import (
 from app.models.paper import Paper
 from app.connectors.europe_pmc import europe_pmc_search
 from app.connectors.openalex import openalex_search
+from app.connectors.crossref import crossref_search
 from app.connectors.pubmed import build_pubmed_term, pubmed_fetch_details, pubmed_search_page
 
 from app.connectors.semantic_scholar import (
@@ -67,6 +68,7 @@ SINGLE_EXPORT_SOURCES = {
     "openalex",
     "europe_pmc",
     "semantic_scholar",
+    "crossref",
 }
 
 MULTI_SOURCE_EXPORT_SOURCES = [
@@ -74,6 +76,7 @@ MULTI_SOURCE_EXPORT_SOURCES = [
     "openalex",
     "europe_pmc",
     "semantic_scholar",
+    "crossref",
 ]
 
 SUPPORTED_EXPORT_SOURCES = SINGLE_EXPORT_SOURCES | {"all"}
@@ -1131,6 +1134,40 @@ async def _fetch_europe_pmc_export_records(
         "final_cursor_present": bool(cursor),
     }
 
+async def _fetch_crossref_export_records(
+    *,
+    r: ArqRedis,
+    job_id: str,
+    source: str,
+    q: str,
+    sort: str,
+    limit: int,
+    meta: dict[str, str],
+    tenant_id: str,
+    cache_stats: dict,
+    metrics,
+):
+    year_min_i = _meta_int(meta, "year_min")
+    year_max_i = _meta_int(meta, "year_max")
+
+    papers, total_count = await _run_sync(
+        crossref_search,
+        q,
+        page=1,
+        n=limit,
+        sort=sort,
+        year_min=year_min_i,
+        year_max=year_max_i,
+    )
+
+    papers = normalize_papers(papers or [], source="crossref")
+
+    for p in papers:
+        p.source = "crossref"
+
+    return papers, {
+        "total_count": total_count,
+    }
 
 def _pubmed_pmid_key(p: Paper) -> str:
     pmid = str(getattr(p, "pmid", "") or "").strip()
@@ -1165,7 +1202,7 @@ async def _fetch_pubmed_export_records(
     CONTACT_EMAIL: str | None,
 ) -> tuple[list[Paper], dict[str, Any]]:
     papers: list[Paper] = []
-    
+
     PUBMED_TENANT_RPS = int(os.getenv("PUBMED_TENANT_RPS", "8"))
     PUBMED_GLOBAL_RPS = int(os.getenv("PUBMED_GLOBAL_RPS", "20"))
     PUBMED_EFETCH_CONCURRENCY = max(1, min(int(os.getenv("PUBMED_EFETCH_CONCURRENCY", "2")), 3))
@@ -1573,7 +1610,7 @@ async def _fetch_semantic_scholar_export_records(
     has_abstract_i = int((meta.get("has_abstract") or "0").strip() or "0")
 
     year_min_i = _meta_int(meta, "year_min")
-    year_max_i = _meta_int(meta, "year_max")  
+    year_max_i = _meta_int(meta, "year_max")
 
     SS_TENANT_RPM = int(os.getenv("SEMANTIC_SCHOLAR_TENANT_RPM", "60"))
     SS_GLOBAL_RPM = int(os.getenv("SEMANTIC_SCHOLAR_GLOBAL_RPM", "300"))
@@ -2050,7 +2087,7 @@ async def _fetch_semantic_scholar_export_records(
         "ss_effective_limit": ss_effective_limit,
         "ss_next_token_present": ss_next_token_present,
         "requested_limit": requested_limit,
-    }            
+    }
 
 # =========================================================
 # Main ARQ task
@@ -2077,7 +2114,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
 
     source = _as_str(meta.get("source"))
     q = _as_str(meta.get("q"))
-    sort = _as_str(meta.get("sort") or "relevance")   
+    sort = _as_str(meta.get("sort") or "relevance")
     limit = min(int(_as_str(meta.get("limit") or "100") or "100"), BULK_HARD_CAP)
     fmt = _as_str(meta.get("fmt") or "csv")
     download_token = _as_str(meta.get("download_token"))
@@ -2106,7 +2143,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             raise RuntimeError("Query empty")
         if source not in SUPPORTED_EXPORT_SOURCES:
             raise RuntimeError(f"Unsupported source: {source}")
-        
+
         export_sources = _resolve_export_sources(source)
 
         if fmt not in {"csv", "ris", "xlsx"}:
@@ -2203,7 +2240,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             cross_source_duplicates_removed = result["duplicates_removed"]
             source_counts = result["source_counts"]
             failed_sources = result["failed_sources"]
-            
+
 
         # =====================================================
         # OPENALEX
@@ -2262,6 +2299,23 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             cursor = epmc_meta["cursor"]
 
         # =====================================================
+        # CROSSREF
+        # =====================================================
+        elif source == "crossref":
+            papers, crossref_meta = await _fetch_crossref_export_records(
+                r=r,
+                job_id=job_id,
+                source=source,
+                q=q,
+                sort=sort,
+                limit=limit,
+                meta=meta,
+                tenant_id=tenant_id,
+                cache_stats=cache_stats,
+                metrics=metrics,
+            )
+
+        # =====================================================
         # SEMANTIC SCHOLAR
         # =====================================================
         elif source == "semantic_scholar":
@@ -2282,8 +2336,8 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             ss_effective_limit = ss_meta["ss_effective_limit"]
             ss_next_token_present = ss_meta["ss_next_token_present"]
             requested_limit = ss_meta["requested_limit"]
-        
-        
+
+
         # =====================================================
         # Final dedup + sort + Write output
         # =====================================================
@@ -2332,7 +2386,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             "records_after_final_dedup": records_after_final_dedup,
             "duplicates_removed": cross_source_duplicates_removed,
         }
-    
+
         if source == "all":
             done_extra.update({
                 "sources": "|".join(MULTI_SOURCE_EXPORT_SOURCES),

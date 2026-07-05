@@ -9,6 +9,20 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  #export_status {
+    display: inline-block;
+    color: var(--text);
+    background: var(--warn);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.35rem 0.55rem;
+    font-weight: 600;
+  }
+
+  #export_status:empty {
+    display: none;
+  }
 </style>
 
 {# Defensive defaults #}
@@ -556,7 +570,9 @@
   }
 
   btn.addEventListener("click", async function () {
-    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Export running...";
+    btn.style.border = "2px solid var(--text)";
     setStatus("Starting export job...");
 
     try {
@@ -580,7 +596,8 @@
     } catch (err) {
       setStatus("Export failed: " + (err && err.message ? err.message : String(err)));
     } finally {
-      btn.disabled = false;
+    btn.textContent = originalText;
+    btn.style.border = "";
     }
   });
 })();
