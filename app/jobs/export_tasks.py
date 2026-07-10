@@ -1150,23 +1150,44 @@ async def _fetch_crossref_export_records(
     year_min_i = _meta_int(meta, "year_min")
     year_max_i = _meta_int(meta, "year_max")
 
-    papers, total_count = await _run_sync(
-        crossref_search,
-        q,
-        page=1,
-        n=limit,
-        sort=sort,
-        year_min=year_min_i,
-        year_max=year_max_i,
-    )
+    page_size = min(100, max(1, int(limit)))
 
-    papers = normalize_papers(papers or [], source="crossref")
+    out: list[Paper] = []
+    page_i = 1
+    total_count = 0
 
-    for p in papers:
-        p.source = "crossref"
+    while len(out) < limit:
+        batch, total_count = await _run_sync(
+            crossref_search,
+            q,
+            page=page_i,
+            n=page_size,
+            sort=sort,
+            year_min=year_min_i,
+            year_max=year_max_i,
+        )
+
+        if not batch:
+            break
+
+        batch = normalize_papers(batch, source="crossref")
+
+        for p in batch:
+            p.source = "crossref"
+
+        out.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        page_i += 1
+
+    papers = out[:limit]
 
     return papers, {
         "total_count": total_count,
+        "page_size": page_size,
+        "pages_fetched": page_i,
     }
 
 def _pubmed_pmid_key(p: Paper) -> str:
@@ -2302,12 +2323,14 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         # CROSSREF
         # =====================================================
         elif source == "crossref":
+            crossref_sort = normalize_all_sources_sort(sort)
+
             papers, crossref_meta = await _fetch_crossref_export_records(
                 r=r,
                 job_id=job_id,
                 source=source,
                 q=q,
-                sort=sort,
+                sort=crossref_sort,
                 limit=limit,
                 meta=meta,
                 tenant_id=tenant_id,
@@ -2347,7 +2370,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
 
         records_before_final_dedup = len(papers)
 
-        if source in {"pubmed", "openalex"}:
+        if source in {"pubmed", "openalex", "crossref"}:
             cross_source_duplicates_removed = 0
         else:
             papers, cross_source_duplicates_removed = deduplicate_papers(papers)
@@ -2355,12 +2378,10 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         records_after_final_dedup = len(papers)
 
         if not (
-            source in {"pubmed", "openalex", "all"}
+            source in {"pubmed", "openalex", "crossref", "all"}
             or (source == "semantic_scholar" and ss_mode_for_summary == "bulk")
         ):
             papers = _sort_papers_for_export(papers, sort, q=q)
-
-        papers = papers[:final_limit]
 
         collected = len(papers)
 
@@ -2471,6 +2492,18 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
                     else str(authors)
                 )
 
+                if not authors_str and getattr(p, "source", "") == "crossref":
+                    authors_str = "[No author metadata in Crossref]"
+
+                year_value = getattr(p, "year", None)
+
+                if (
+                    not year_value
+                    and getattr(p, "source", "") == "crossref"
+                    and getattr(p, "publication_date", None)
+                ):
+                    year_value = str(getattr(p, "publication_date"))[:4]
+
                 ws.append(
                     [
                         getattr(p, "id", "") or "",
@@ -2478,7 +2511,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
                         getattr(p, "title", "") or "",
                         authors_str,
                         getattr(p, "journal", "") or "",
-                        str(getattr(p, "year", "") or ""),
+                        str(year_value or ""),
                         getattr(p, "doi", "") or "",
                         getattr(p, "pmcid", "") or "",
                         getattr(p, "url", "") or "",
