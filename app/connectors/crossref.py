@@ -44,14 +44,16 @@ def _first_text(value) -> str:
 
 def _extract_authors(item: dict) -> List[str]:
     authors: List[str] = []
-    for a in item.get("author") or []:
+    contributors = item.get("author") or item.get("editor") or []
+
+    for a in contributors:
         given = str(a.get("given") or "").strip()
         family = str(a.get("family") or "").strip()
         name = " ".join(part for part in [given, family] if part)
         if name:
             authors.append(name)
-    return authors
 
+    return authors
 
 def _extract_year(item: dict) -> Optional[int]:
     for key in ("published-print", "published-online", "published", "issued"):
