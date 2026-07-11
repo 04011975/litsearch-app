@@ -131,6 +131,7 @@ def interleave_by_source(items):
     source_order = [
         "pubmed",
         "openalex",
+        "crossref",
         "europe_pmc",
         "semantic_scholar",
     ]
