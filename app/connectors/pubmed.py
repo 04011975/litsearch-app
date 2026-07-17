@@ -1,29 +1,33 @@
 from __future__ import annotations
-import logging
-logger = logging.getLogger("litsearch.connector.pubmed")
-from dataclasses import dataclass
-from typing import Any
 
 import asyncio
+from dataclasses import dataclass
 import json
+import logging
+import os
 import random
 import re
 import time
+from typing import Any
 import xml.etree.ElementTree as ET
 
 import httpx
-# ✅ Canonical Paper model (interface-contract)
-# Zorg dat dit bestand bestaat: app/models/paper.py
+
 from app.models.paper import Paper
-import os
+
+logger = logging.getLogger("litsearch.connector.pubmed")
+
 TOOL_NAME = os.getenv("TOOL_NAME", "LitSearch")
 NCBI_API_KEY = os.getenv("NCBI_API_KEY") or None
 CONTACT_EMAIL = os.getenv("CONTACT_EMAIL") or None
-PUBMED_USER_AGENT = f"{TOOL_NAME}/1.0" + (f" (contact: {CONTACT_EMAIL})" if CONTACT_EMAIL else "")
+PUBMED_USER_AGENT = f"{TOOL_NAME}/1.0" + (
+    f" (contact: {CONTACT_EMAIL})" if CONTACT_EMAIL else ""
+)
 
 # =========================================================
 # Search result model (PubMed paging)
 # =========================================================
+
 
 @dataclass(frozen=True)
 class SearchPageResult:
@@ -31,6 +35,7 @@ class SearchPageResult:
     count: int
     webenv: str
     query_key: str
+
 
 # =========================================================
 # PubMed ESearch paging limit
@@ -43,10 +48,12 @@ ESEARCH_MAX_PMIDS_PER_QUERY = 10_000
 # Simple TTL cache
 # =========================================================
 
+
 class TTLCache:
     def __init__(self, ttl_seconds: int = 300) -> None:
         self.ttl = ttl_seconds
         self._store: dict[str, tuple[float, Any]] = {}
+
     def get(self, key: str) -> Any | None:
         item = self._store.get(key)
         if not item:
@@ -56,15 +63,18 @@ class TTLCache:
             self._store.pop(key, None)
             return None
         return value
+
     def set(self, key: str, value: Any) -> None:
         self._store[key] = (time.time() + self.ttl, value)
 
-HISTORY_CACHE = TTLCache(ttl_seconds=900)   # 15 min
-PAPER_CACHE = TTLCache(ttl_seconds=3600)   # 60 min
+
+HISTORY_CACHE = TTLCache(ttl_seconds=900)  # 15 min
+PAPER_CACHE = TTLCache(ttl_seconds=3600)  # 60 min
 
 # =========================================================
 # Helpers (clean values + parsing)
 # =========================================================
+
 
 def _clean_api_key(api_key: str | None) -> str | None:
     if not api_key:
@@ -72,17 +82,26 @@ def _clean_api_key(api_key: str | None) -> str | None:
     k = str(api_key).strip()
     if not k:
         return None
-    if k.lower() in {"xxx", "xxxx", "changeme", "change-me", "your_key_here", "your-api-key"}:
+    if k.lower() in {
+        "xxx",
+        "xxxx",
+        "changeme",
+        "change-me",
+        "your_key_here",
+        "your-api-key",
+    }:
         return None
     if len(k) < 16:
         return None
     return k
+
 
 def _clean_tool(tool: str | None) -> str | None:
     if not tool:
         return None
     t = str(tool).strip()
     return t or None
+
 
 def _clean_email(email: str | None) -> str | None:
     if not email:
@@ -96,6 +115,7 @@ def _clean_email(email: str | None) -> str | None:
         return None
     return e
 
+
 def _extract_year(pubdate: str) -> int | None:
     if not pubdate:
         return None
@@ -107,14 +127,17 @@ def _extract_year(pubdate: str) -> int | None:
                 return None
     return None
 
+
 def _safe_text(el: ET.Element | None) -> str:
     if el is None:
         return ""
     return "".join(el.itertext()).strip()
 
+
 def _first_text(root: ET.Element, xpath: str) -> str:
     el = root.find(xpath)
     return _safe_text(el)
+
 
 def _join_authors_list(article: ET.Element) -> list[str]:
     out: list[str] = []
@@ -130,11 +153,14 @@ def _join_authors_list(article: ET.Element) -> list[str]:
             out.append(last)
     return out[:25]
 
+
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
 
 def _safe_json_loads(text: str) -> dict:
     cleaned = _CONTROL_CHARS.sub("", text or "")
     return json.loads(cleaned, strict=False)
+
 
 def _normalize_doi(doi: str) -> str:
     d = (doi or "").strip()
@@ -142,10 +168,11 @@ def _normalize_doi(doi: str) -> str:
         return ""
     return (
         d.replace("https://doi.org/", "")
-         .replace("http://doi.org/", "")
-         .replace("doi:", "")
-         .strip()
+        .replace("http://doi.org/", "")
+        .replace("doi:", "")
+        .strip()
     )
+
 
 def _extract_pmcid(article: ET.Element) -> str | None:
     # PMCID zit meestal in PubmedData/ArticleIdList als IdType="pmc"
@@ -155,6 +182,7 @@ def _extract_pmcid(article: ET.Element) -> str | None:
             if v:
                 return v if v.upper().startswith("PMC") else f"PMC{v}"
     return None
+
 
 def _best_journal_name(art: ET.Element) -> str:
     # 1) Volledige titel
@@ -168,6 +196,7 @@ def _best_journal_name(art: ET.Element) -> str:
     # 3) ISOAbbreviation
     iso = _first_text(art, ".//Journal/ISOAbbreviation").strip()
     return iso
+
 
 def build_pubmed_term(
     q: str,
@@ -201,6 +230,7 @@ def build_pubmed_term(
     if base:
         return base
     return " AND ".join(filters)
+
 
 async def _get_json(url: str, params: dict[str, Any], timeout: float = 30.0) -> dict:
     headers = {
@@ -240,19 +270,27 @@ async def _get_json(url: str, params: dict[str, Any], timeout: float = 30.0) -> 
                         f"Could not parse NCBI response as JSON: {e}. Response starts: {snippet}"
                     )
 
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as e:
+            except (
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.HTTPStatusError,
+            ) as e:
                 last_err = e
 
                 if attempt >= max_retries - 1:
                     break
 
                 response = getattr(e, "response", None)
-                retry_after = response.headers.get("Retry-After") if response is not None else None
+                retry_after = (
+                    response.headers.get("Retry-After")
+                    if response is not None
+                    else None
+                )
 
                 try:
-                    wait_s = float(retry_after) if retry_after else 0.5 * (2 ** attempt)
+                    wait_s = float(retry_after) if retry_after else 0.5 * (2**attempt)
                 except ValueError:
-                    wait_s = 0.5 * (2 ** attempt)
+                    wait_s = 0.5 * (2**attempt)
 
                 jitter = random.uniform(0.0, 0.25)
 
@@ -267,8 +305,11 @@ async def _get_json(url: str, params: dict[str, Any], timeout: float = 30.0) -> 
 
                 await asyncio.sleep(wait_s + jitter)
 
-    raise RuntimeError(f"PubMed JSON request failed after {max_retries} retries: {last_err}")
-        
+    raise RuntimeError(
+        f"PubMed JSON request failed after {max_retries} retries: {last_err}"
+    )
+
+
 def _extract_pubdate_text(article: ET.Element) -> str:
     def fmt_date(node: ET.Element | None) -> str:
         if node is None:
@@ -310,6 +351,7 @@ def _extract_pubdate_text(article: ET.Element) -> str:
 
     return ""
 
+
 def _fmt_pubdate_node(node: ET.Element | None) -> str:
     if node is None:
         return ""
@@ -331,6 +373,7 @@ def _fmt_pubdate_node(node: ET.Element | None) -> str:
     txt = _safe_text(node).strip()
     return txt or ""
 
+
 def _extract_preferred_pubdate(art: ET.Element) -> tuple[str, int | None]:
     for node in art.findall("./ArticleDate"):
         pubdate = _fmt_pubdate_node(node)
@@ -345,6 +388,7 @@ def _extract_preferred_pubdate(art: ET.Element) -> tuple[str, int | None]:
         return pubdate, year
 
     return "", None
+
 
 def _parse_mesh_terms(mesh: str, mesh_mode: str | None = None) -> tuple[list[str], str]:
     raw = (mesh or "").strip()
@@ -363,9 +407,11 @@ def _parse_mesh_terms(mesh: str, mesh_mode: str | None = None) -> tuple[list[str
             terms.append(p)
     return terms, mode
 
+
 # =========================================================
 # PubMed: ESearch with History Server
 # =========================================================
+
 
 async def _esearch_create_history(
     term: str,
@@ -413,6 +459,7 @@ async def _esearch_create_history(
         count = 0
     return webenv, query_key, count
 
+
 async def _esearch_fetch_page_from_history(
     webenv: str,
     query_key: str,
@@ -458,7 +505,8 @@ async def _esearch_fetch_page_from_history(
     idlist = es.get("idlist") or []
     return [str(x) for x in idlist]
 
-async def pubmed_search_page(  
+
+async def pubmed_search_page(
     term: str,
     *,
     max_results: int = 10,
@@ -474,13 +522,13 @@ async def pubmed_search_page(
     email = email or CONTACT_EMAIL
     if not term:
         return SearchPageResult(pmids=[], count=0, webenv="", query_key="")
-    
+
     logger.info(
-    "pubmed_search term=%r retstart=%s n=%s sort=%s",
-    term,
-    retstart,
-    max_results,
-    sort,
+        "pubmed_search term=%r retstart=%s n=%s sort=%s",
+        term,
+        retstart,
+        max_results,
+        sort,
     )
     cache_key = f"hist::{sort}::{term}"
     cached = HISTORY_CACHE.get(cache_key)
@@ -507,11 +555,15 @@ async def pubmed_search_page(
         tool=tool,
         email=email,
     )
-    return SearchPageResult(pmids=pmids, count=count, webenv=webenv, query_key=query_key)
+    return SearchPageResult(
+        pmids=pmids, count=count, webenv=webenv, query_key=query_key
+    )
+
 
 # =========================================================
 # PubMed: EFetch details (XML)
 # =========================================================
+
 
 def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
     try:
@@ -520,7 +572,9 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
         logger.exception("pubmed_xml_parse_failed")
         return []
     papers: list[Paper] = []
-    records = list(root.findall(".//PubmedArticle")) + list(root.findall(".//PubmedBookArticle"))
+    records = list(root.findall(".//PubmedArticle")) + list(
+        root.findall(".//PubmedBookArticle")
+    )
     logger.debug(
         "PUBMED XML RECORD pubmed_articles=%s pubmed_book_articles=%s",
         len(root.findall(".//PubmedArticle")),
@@ -528,7 +582,9 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
     )
     for article in records:
         try:
-            pmid = _first_text(article, "./MedlineCitation/PMID") or _first_text(article, ".//PMID")
+            pmid = _first_text(article, "./MedlineCitation/PMID") or _first_text(
+                article, ".//PMID"
+            )
             art = article.find("./MedlineCitation/Article")
             book = article.find("./BookDocument")
             is_book_record = book is not None
@@ -540,7 +596,9 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
             pubdate = ""
             if art is not None:
                 title = _first_text(art, "ArticleTitle") or ""
-                abstract_txt = " ".join(_safe_text(x) for x in art.findall(".//Abstract/AbstractText")).strip()
+                abstract_txt = " ".join(
+                    _safe_text(x) for x in art.findall(".//Abstract/AbstractText")
+                ).strip()
                 abstract = abstract_txt or None
                 journal = _best_journal_name(art) or ""
 
@@ -550,8 +608,14 @@ def _parse_pubmed_article_xml(xml_text: str) -> list[Paper]:
 
                 authors_list = _join_authors_list(art)
             elif book is not None:
-                title = _first_text(book, "ArticleTitle") or _first_text(book, "BookTitle") or ""
-                abstract_txt = " ".join(_safe_text(x) for x in book.findall(".//Abstract/AbstractText")).strip()
+                title = (
+                    _first_text(book, "ArticleTitle")
+                    or _first_text(book, "BookTitle")
+                    or ""
+                )
+                abstract_txt = " ".join(
+                    _safe_text(x) for x in book.findall(".//Abstract/AbstractText")
+                ).strip()
                 abstract = abstract_txt or None
                 journal = (
                     _first_text(article, ".//Book/BookTitle")
@@ -645,8 +709,10 @@ EFETCH_MAX_CONCURRENCY = 3
 EFETCH_DELAY_SECONDS = 0.34
 EFETCH_MAX_RETRIES = 4
 
+
 def _chunked(items: list[str], size: int) -> list[list[str]]:
-    return [items[i:i + size] for i in range(0, len(items), size)]
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
 
 async def _get_text_with_retry(
     client: httpx.AsyncClient,
@@ -671,10 +737,11 @@ async def _get_text_with_retry(
             return r.text
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as e:
             last_err = e
-            base = 0.5 * (2 ** attempt)
+            base = 0.5 * (2**attempt)
             jitter = random.uniform(0.0, 0.25)
             await asyncio.sleep(base + jitter)
     raise RuntimeError(f"EFetch failed after {max_retries} retries: {last_err}")
+
 
 async def pubmed_fetch_details(
     pmids: list[str],
@@ -704,7 +771,10 @@ async def pubmed_fetch_details(
         return [cached_papers[p] for p in pmids if p in cached_papers]
     url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
     sem = asyncio.Semaphore(EFETCH_MAX_CONCURRENCY)
-    async def fetch_batch(client: httpx.AsyncClient, batch_pmids: list[str]) -> list[Paper]:
+
+    async def fetch_batch(
+        client: httpx.AsyncClient, batch_pmids: list[str]
+    ) -> list[Paper]:
         async with sem:
             if EFETCH_DELAY_SECONDS > 0:
                 await asyncio.sleep(EFETCH_DELAY_SECONDS)
@@ -727,7 +797,8 @@ async def pubmed_fetch_details(
                 len(parsed),
                 batch_pmids,
             )
-            return parsed   
+            return parsed
+
     batches = _chunked(missing, EFETCH_BATCH_SIZE)
     async with httpx.AsyncClient() as client:
         results = await asyncio.gather(*(fetch_batch(client, b) for b in batches))
@@ -765,7 +836,66 @@ async def pubmed_fetch_details(
                         PAPER_CACHE.set(f"paper::{pmid}", p)
                         all_by_id[pmid] = p
                 except Exception:
-                    logger.exception("pubmed_fetch_details single fallback failed pmid=%s", pmid)
+                    logger.exception(
+                        "pubmed_fetch_details single fallback failed pmid=%s", pmid
+                    )
     return [all_by_id[p] for p in pmids if p in all_by_id]
 
-__all__ = ["Paper", "SearchPageResult", "build_pubmed_term", "pubmed_search_page", "pubmed_fetch_details"]
+
+async def pubmed_fetch_mesh_terms(
+    pmid: str,
+    *,
+    api_key: str | None = None,
+    tool: str | None = None,
+    email: str | None = None,
+) -> list[str]:
+    """
+    Fetch MeSH descriptor terms for one PubMed record.
+
+    Reuses the existing PubMed detail retrieval so EFetch, retries,
+    caching, and XML parsing remain centralized.
+    """
+
+    normalized_pmid = str(pmid or "").strip()
+
+    if not normalized_pmid or not normalized_pmid.isdigit():
+        return []
+
+    papers = await pubmed_fetch_details(
+        [normalized_pmid],
+        api_key=api_key,
+        tool=tool,
+        email=email,
+    )
+
+    if not papers:
+        return []
+
+    mesh_terms: list[str] = []
+    seen: set[str] = set()
+
+    for value in papers[0].mesh_terms or []:
+        term = str(value or "").strip()
+
+        if not term:
+            continue
+
+        key = term.casefold()
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        mesh_terms.append(term)
+
+    return mesh_terms
+
+
+__all__ = [
+    "Paper",
+    "SearchPageResult",
+    "build_pubmed_term",
+    "pubmed_search_page",
+    "pubmed_fetch_details",
+    "pubmed_fetch_mesh_terms",
+]

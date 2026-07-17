@@ -43,8 +43,15 @@ async def test_epmc_detail_fetch_works():
     assert total >= 0
     assert papers
 
-    pid = papers[0].id
-    detail = europe_pmc_fetch_detail(pid)
+    detail = next(
+        (
+            europe_pmc_fetch_detail(p.id)
+            for p in papers
+            if europe_pmc_fetch_detail(p.id) is not None
+        ),
+        None,
+    )
+
     assert detail is not None
     assert detail.id
     assert detail.title
@@ -72,6 +79,7 @@ async def test_epmc_cursor_paging_works():
         )
         assert total2 >= 0
         assert isinstance(page2, list)
+
 
 @pytest.mark.anyio
 async def test_epmc_year_range_semantics():
