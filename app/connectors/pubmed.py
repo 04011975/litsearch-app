@@ -174,6 +174,60 @@ def _normalize_doi(doi: str) -> str:
     )
 
 
+async def pubmed_resolve_pmid_by_doi(
+    doi: str,
+    *,
+    api_key: str | None = None,
+    tool: str | None = None,
+    email: str | None = None,
+) -> str | None:
+    normalized_doi = _normalize_doi(doi)
+
+    if not normalized_doi:
+        return None
+
+    api_key = api_key or NCBI_API_KEY
+    tool = tool or TOOL_NAME
+    email = email or CONTACT_EMAIL
+
+    api_key = _clean_api_key(api_key)
+    tool = _clean_tool(tool)
+    email = _clean_email(email)
+
+    url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+    params: dict[str, Any] = {
+        "db": "pubmed",
+        "term": f'"{normalized_doi}"[AID]',
+        "retmode": "json",
+        "retmax": 2,
+    }
+
+    if api_key:
+        params["api_key"] = api_key
+    if tool:
+        params["tool"] = tool
+    if email:
+        params["email"] = email
+
+    logger.info(
+        "pubmed_resolve_pmid_by_doi doi=%r",
+        normalized_doi,
+    )
+
+    data = await _get_json(url, params=params)
+    esearch_result = data.get("esearchresult") or {}
+    id_list = esearch_result.get("idlist") or []
+
+    valid_pmids = [
+        str(value).strip() for value in id_list if str(value).strip().isdigit()
+    ]
+
+    if len(valid_pmids) != 1:
+        return None
+
+    return valid_pmids[0]
+
+
 def _extract_pmcid(article: ET.Element) -> str | None:
     # PMCID zit meestal in PubmedData/ArticleIdList als IdType="pmc"
     for aid in article.findall(".//ArticleIdList/ArticleId"):

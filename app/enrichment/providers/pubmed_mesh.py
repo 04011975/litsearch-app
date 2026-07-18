@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from app.connectors.pubmed import pubmed_fetch_mesh_terms
+from app.connectors.pubmed import (
+    pubmed_fetch_mesh_terms,
+    pubmed_resolve_pmid_by_doi,
+)
+
 from app.enrichment.base import EnrichmentResult
 from app.models.paper import Paper
 
 
 class PubMedMeshProvider:
-    """Enrich PubMed papers with MeSH descriptor terms."""
+    """Enrich papers with MeSH descriptor terms from PubMed."""
 
     name = "pubmed_mesh"
 
     async def enrich(self, paper: Paper) -> EnrichmentResult:
-        pmid = self._get_pmid(paper)
+        pmid = await self._get_pmid(paper)
 
         if pmid is None:
             return EnrichmentResult(matched=False)
@@ -32,13 +36,18 @@ class PubMedMeshProvider:
         )
 
     @staticmethod
-    def _get_pmid(paper: Paper) -> str | None:
+    async def _get_pmid(paper: Paper) -> str | None:
         paper_id = str(paper.id or "").strip()
 
-        if paper.source != "pubmed":
+        if paper.source == "pubmed":
+            if not paper_id.isdigit():
+                return None
+
+            return paper_id
+
+        doi = str(paper.doi or "").strip()
+
+        if not doi:
             return None
 
-        if not paper_id.isdigit():
-            return None
-
-        return paper_id
+        return await pubmed_resolve_pmid_by_doi(doi)
