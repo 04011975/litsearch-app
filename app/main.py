@@ -32,10 +32,18 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 
-from app.connectors.europe_pmc import europe_pmc_fetch_detail, europe_pmc_search, EuropePmcTemporaryError
+from app.connectors.europe_pmc import (
+    europe_pmc_fetch_detail,
+    europe_pmc_search,
+    EuropePmcTemporaryError,
+)
 from app.connectors.openalex import openalex_fetch_detail, openalex_search
 from app.connectors.crossref import crossref_fetch_detail, crossref_search
-from app.connectors.pubmed import build_pubmed_term, pubmed_fetch_details, pubmed_search_page
+from app.connectors.pubmed import (
+    build_pubmed_term,
+    pubmed_fetch_details,
+    pubmed_search_page,
+)
 
 from app.connectors.semantic_scholar import (
     SemanticScholarError,
@@ -47,7 +55,12 @@ from app.connectors.semantic_scholar import (
 from app.jobs.epmc_tasks import epmc_build_key, epmc_cache_key
 from app.models.paper import Paper
 from app.redis_client import make_redis
-from app.services.redis_policy import cache_get_json, cache_set_json, make_cache_key, rate_limit_sliding_window
+from app.services.redis_policy import (
+    cache_get_json,
+    cache_set_json,
+    make_cache_key,
+    rate_limit_sliding_window,
+)
 from app.specializations import get_source_info
 
 from app.core.deduplication import deduplicate_papers
@@ -78,9 +91,13 @@ from contextlib import asynccontextmanager
 
 from copy import copy
 
+from app.enrichment import enrich_paper
+from app.enrichment.providers.pubmed_mesh import PubMedMeshProvider
+
 # =========================================================
 # Small helpers
 # =========================================================
+
 
 def _as_str(v: Any) -> str:
     if v is None:
@@ -105,13 +122,20 @@ def _build_url(path: str, params: dict[str, Any] | None = None) -> str:
 
 
 def _tenant_id(request: Request) -> str:
-    return request.headers.get("X-Tenant-Id") or (request.client.host if request.client else "anon") or "anon"
+    return (
+        request.headers.get("X-Tenant-Id")
+        or (request.client.host if request.client else "anon")
+        or "anon"
+    )
 
 
 async def _run_sync(fn: Callable, *args, **kwargs):
     return await anyio.to_thread.run_sync(lambda: fn(*args, **kwargs))
 
-def _extract_concept_suggestions(papers: Iterable[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
+
+def _extract_concept_suggestions(
+    papers: Iterable[dict[str, Any]], limit: int = 10
+) -> list[dict[str, Any]]:
     counter: Counter[str] = Counter()
     for p in papers:
         concepts = p.get("concepts") or []
@@ -121,7 +145,9 @@ def _extract_concept_suggestions(papers: Iterable[dict[str, Any]], limit: int = 
             c2 = str(c).strip()
             if c2:
                 counter[c2] += 1
-    return [{"term": term, "count": count} for term, count in counter.most_common(limit)]
+    return [
+        {"term": term, "count": count} for term, count in counter.most_common(limit)
+    ]
 
 
 # =========================================================
@@ -137,6 +163,8 @@ DEBUG_ENDPOINTS = os.getenv("DEBUG_ENDPOINTS", "0") == "1"
 NCBI_API_KEY = (os.getenv("NCBI_API_KEY") or "").strip() or None
 TOOL_NAME = (os.getenv("TOOL_NAME") or "LitSearch").strip()
 CONTACT_EMAIL = (os.getenv("CONTACT_EMAIL") or "").strip() or None
+
+PUBMED_MESH_PROVIDER = PubMedMeshProvider()
 
 REDIS_URL = (os.getenv("REDIS_URL") or "").strip() or None
 
@@ -159,7 +187,14 @@ OPENALEX_TENANT_RPM = 60
 OPENALEX_GLOBAL_RPM = 600
 SEMANTIC_SCHOLAR_CACHE_TTL_S = 600
 
-ALLOWED_SOURCES = {"pubmed", "europe_pmc", "openalex", "semantic_scholar", "crossref", "all"}
+ALLOWED_SOURCES = {
+    "pubmed",
+    "europe_pmc",
+    "openalex",
+    "semantic_scholar",
+    "crossref",
+    "all",
+}
 SOURCE_PATTERN = "^(" + "|".join(ALLOWED_SOURCES) + ")$"
 
 if not CONTACT_EMAIL:
@@ -187,6 +222,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("litsearch.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -235,6 +271,7 @@ async def lifespan(app: FastAPI):
             logger.exception("Failed closing sync redis")
         _redis = None
 
+
 app = FastAPI(title="LitSearch", version=APP_VERSION, lifespan=lifespan)
 
 # =========================================================
@@ -256,7 +293,6 @@ SOURCE_SPECIALIZATIONS = {
             "limited full-text metadata",
         ],
     },
-
     "europe_pmc": {
         "label": "Europe PMC",
         "role": "Full-text biomedical literature repository",
@@ -272,7 +308,6 @@ SOURCE_SPECIALIZATIONS = {
             "metadata variability",
         ],
     },
-
     "openalex": {
         "label": "OpenAlex",
         "role": "Global scholarly knowledge graph",
@@ -288,7 +323,6 @@ SOURCE_SPECIALIZATIONS = {
             "basic pagination limits",
         ],
     },
-
     "crossref": {
         "label": "Crossref",
         "role": "Scholarly metadata and DOI registry",
@@ -304,7 +338,6 @@ SOURCE_SPECIALIZATIONS = {
             "metadata quality depends on publisher deposits",
         ],
     },
-
     "semantic_scholar": {
         "label": "Semantic Scholar",
         "role": "AI-enhanced research discovery engine",
@@ -320,8 +353,7 @@ SOURCE_SPECIALIZATIONS = {
             "metadata heterogeneity",
         ],
     },
-
-        "all": {
+    "all": {
         "label": "All sources",
         "role": "Multi-source literature retrieval",
         "specialization": "Combined export across PubMed, Europe PMC, OpenAlex, and Semantic Scholar.",
@@ -358,6 +390,7 @@ def _redis_client() -> redis_sync.Redis | None:
         logger.exception("Sync Redis not available (continuing without cursor cache)")
         return None
 
+
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
     start = time.time()
@@ -384,7 +417,9 @@ async def request_logging_middleware(request: Request, call_next):
         raise
     except Exception:
         ms = int((time.time() - start) * 1000)
-        logger.exception("HTTP %s %s FAILED ms=%s qp=%r", request.method, request.url.path, ms, qp)
+        logger.exception(
+            "HTTP %s %s FAILED ms=%s qp=%r", request.method, request.url.path, ms, qp
+        )
         return PlainTextResponse("Internal Server Error (see logs)", status_code=500)
 
 
@@ -392,8 +427,12 @@ async def request_logging_middleware(request: Request, call_next):
 # Helpers (Europe PMC cursor cache) - CHUNK BASED (FILTER-AWARE)
 # =========================================================
 
-EPMC_CHUNK_SIZE = int(os.getenv("EUROPE_PMC_BUILD_PAGE_SIZE", "500"))  # must match epmc_tasks.py
-EPMC_PAGE_CAP = int(os.getenv("EUROPE_PMC_CONNECTOR_PAGE_CAP", "100"))  # connector cap (keep in sync)
+EPMC_CHUNK_SIZE = int(
+    os.getenv("EUROPE_PMC_BUILD_PAGE_SIZE", "500")
+)  # must match epmc_tasks.py
+EPMC_PAGE_CAP = int(
+    os.getenv("EUROPE_PMC_CONNECTOR_PAGE_CAP", "100")
+)  # connector cap (keep in sync)
 
 
 def _epmc_ui_offset(page: int, n: int) -> int:
@@ -413,6 +452,7 @@ def _epmc_in_chunk_offset(page: int, n: int) -> int:
 # =========================================================
 # Generic helpers (no imports here!)
 # =========================================================
+
 
 def _safe_int(s: str | None, default: int | None = None) -> int | None:
     try:
@@ -485,6 +525,7 @@ def _europe_pmc_external_url(p: Any) -> str:
 # Sorting (UI -> canonical; per-source mapping)
 # -------------------------
 
+
 def _paper_year_value(p: dict[str, Any] | Paper) -> int:
     if isinstance(p, dict):
         value = p.get("year") or p.get("publication_date")
@@ -505,10 +546,12 @@ def _paper_year_value(p: dict[str, Any] | Paper) -> int:
 
     return year
 
+
 def _paper_date_sort_key_ui(p: dict[str, Any]) -> tuple[int, str]:
     year = _paper_year_value(p)
     title = str(p.get("title") or "").lower().strip()
     return (year, title)
+
 
 def _ui_relevance_score(p: dict[str, Any], q: str) -> tuple[int, int, str]:
     title = str(p.get("title") or "").lower()
@@ -543,6 +586,7 @@ def _sort_papers_for_ui(
 
     return papers
 
+
 def _cap_page(page: int, total_pages: int) -> int:
     return max(1, min(int(page), max(1, int(total_pages))))
 
@@ -552,7 +596,11 @@ def _pagination_limits_pubmed(total_count: int, n: int) -> tuple[int, int, bool]
     total_pages_uncapped = max(1, math.ceil(total_count / n))
     max_pageable_pages = max(1, math.ceil(PUBMED_MAX_PAGEABLE_RESULTS / n))
     total_pages_capped = min(total_pages_uncapped, max_pageable_pages)
-    return total_pages_uncapped, total_pages_capped, (total_pages_uncapped != total_pages_capped)
+    return (
+        total_pages_uncapped,
+        total_pages_capped,
+        (total_pages_uncapped != total_pages_capped),
+    )
 
 
 def _pubmed_cap_warning(total_count: int) -> str:
@@ -619,7 +667,9 @@ def _paper_to_dict(p: Paper, *, source: str) -> dict[str, Any]:
 def _papers_to_csv(papers: List[Paper]) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["ID", "Title", "Authors", "Journal", "Year", "DOI", "PMCID", "URL"])
+    writer.writerow(
+        ["ID", "Title", "Authors", "Journal", "Year", "DOI", "PMCID", "URL"]
+    )
     for p in papers:
         authors = getattr(p, "authors", []) or []
         if isinstance(authors, list):
@@ -688,6 +738,7 @@ def _papers_to_ris(papers: List[Paper]) -> str:
         lines.append("")
     return "\n".join(lines)
 
+
 def _papers_to_xlsx_bytes(papers: List[Paper]) -> bytes:
     wb = Workbook()
     ws = wb.active
@@ -740,7 +791,10 @@ def _papers_to_xlsx_bytes(papers: List[Paper]) -> bytes:
     wb.save(buf)
     return buf.getvalue()
 
-def _extract_mesh_suggestions(papers: Iterable[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
+
+def _extract_mesh_suggestions(
+    papers: Iterable[dict[str, Any]], limit: int = 10
+) -> list[dict[str, Any]]:
     counter: Counter[str] = Counter()
     for p in papers:
         terms = p.get("mesh_terms") or []
@@ -750,7 +804,9 @@ def _extract_mesh_suggestions(papers: Iterable[dict[str, Any]], limit: int = 10)
             t2 = str(t).strip()
             if t2:
                 counter[t2] += 1
-    return [{"term": term, "count": count} for term, count in counter.most_common(limit)]
+    return [
+        {"term": term, "count": count} for term, count in counter.most_common(limit)
+    ]
 
 
 async def _europe_pmc_search_compat_async(
@@ -780,6 +836,7 @@ async def _europe_pmc_search_compat_async(
 # =========================================================
 # Europe PMC FILTER-AWARE cache keys
 # =========================================================
+
 
 def _epmc_key_filters(
     *,
@@ -852,9 +909,13 @@ def _epmc_get_cursor_for_chunk(
         return None
     try:
         key = _epmc_cache_key_filtered(
-            q, n=n, sort=sort,
-            year_min=year_min, year_max=year_max,
-            has_abstract=has_abstract, mesh=mesh,
+            q,
+            n=n,
+            sort=sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
         )
         return _redis.hget(key, str(int(chunk)))
     except Exception:
@@ -877,9 +938,13 @@ def _epmc_set_cursor_for_chunk(
         return
     try:
         key = _epmc_cache_key_filtered(
-            q, n=n, sort=sort,
-            year_min=year_min, year_max=year_max,
-            has_abstract=has_abstract, mesh=mesh,
+            q,
+            n=n,
+            sort=sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
         )
         pipe = _redis.pipeline()
         pipe.hset(key, str(int(chunk)), cursor)
@@ -912,9 +977,13 @@ async def _epmc_enqueue_build(
     target_chunk = _epmc_target_chunk(target_page, n)
 
     bk = _epmc_build_key_filtered(
-        q, n=n, sort=sort,
-        year_min=year_min, year_max=year_max,
-        has_abstract=has_abstract, mesh=mesh,
+        q,
+        n=n,
+        sort=sort,
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
     )
     now = int(time.time())
 
@@ -940,9 +1009,13 @@ async def _epmc_enqueue_build(
     await ARQ_REDIS.expire(bk, EUROPE_PMC_CURSOR_TTL_SECONDS)
 
     job_hash = _epmc_cache_key_filtered(
-        q, n=n, sort=sort,
-        year_min=year_min, year_max=year_max,
-        has_abstract=has_abstract, mesh=mesh,
+        q,
+        n=n,
+        sort=sort,
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
     ).split(":")[-1]
 
     await ARQ_REDIS.enqueue_job(
@@ -962,6 +1035,7 @@ async def _epmc_enqueue_build(
 # =========================================================
 # Template base context
 # =========================================================
+
 
 def _template_base_context(
     request: Request,
@@ -1006,6 +1080,7 @@ def _template_base_context(
 # Detail fetch by source
 # =========================================================
 
+
 async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
     source = (source or "").strip()
     pid = (pid or "").strip()
@@ -1013,7 +1088,9 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
     if source == "pubmed":
         if not pid.isdigit():
             return None
-        papers = await pubmed_fetch_details([pid], api_key=NCBI_API_KEY, tool=TOOL_NAME, email=CONTACT_EMAIL)
+        papers = await pubmed_fetch_details(
+            [pid], api_key=NCBI_API_KEY, tool=TOOL_NAME, email=CONTACT_EMAIL
+        )
         return papers[0] if papers else None
 
     if source == "openalex":
@@ -1052,8 +1129,17 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
         return await _run_sync(fetch_semantic_scholar_detail, pid)
     return None
 
+
+async def _enrich_paper_detail(paper: Paper) -> Paper:
+    return await enrich_paper(
+        paper,
+        providers=[PUBMED_MESH_PROVIDER],
+    )
+
+
 app.state.allowed_sources = ALLOWED_SOURCES
 app.state.fetch_detail_by_source = _fetch_detail_by_source
+app.state.enrich_paper_detail = _enrich_paper_detail
 app.state.paper_to_dict = _paper_to_dict
 app.state.pubmed_external_url = _pubmed_external_url
 app.state.europe_pmc_external_url = _europe_pmc_external_url
@@ -1150,7 +1236,6 @@ async def search(
     ss_mode, ss_api_sort = all_sources_semantic_scholar_sort_mode(ui_sort)
     epmc_sort = ui_sort
 
-
     # --------------------------
     # All Sources
     # --------------------------
@@ -1229,20 +1314,21 @@ async def search(
             mesh=mesh,
         )
 
-        ctx.update({
-            "papers": paged_papers,
-            "mesh_suggestions": [],
-            "concept_suggestions": [],
-            "total_count": total_count,
-            "total_pages": total_pages,
-            "error": None,
-            "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
-            "next_url": next_url,
-            "last_url": last_url,
-        })
+        ctx.update(
+            {
+                "papers": paged_papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "error": None,
+                "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
+                "next_url": next_url,
+                "last_url": last_url,
+            }
+        )
 
         return templates.TemplateResponse(request, "results.html", ctx)
-
 
     # --------------------------
     # EUROPE PMC (cursor paging + deep paging via Redis/ARQ)
@@ -1250,26 +1336,36 @@ async def search(
     if source == "europe_pmc":
         if not q:
             ctx = _template_base_context(
-                request, q=q, source=source, n=n, page=1, sort=ui_sort,
-                year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+                request,
+                q=q,
+                source=source,
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
             )
 
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
             ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
-            ctx.update({
-                "papers": [],
-                "mesh_suggestions": [],
-                "total_count": 0,
-                "total_pages": 1,
-                "error": None,
-                "warning": None,
-                "epmc_next_url": None,
-                "epmc_last_url": None,
-                "epmc_export_url_csv": None,
-                "epmc_export_url_ris": None,
-                "epmc_building": False,
-            })
+            ctx.update(
+                {
+                    "papers": [],
+                    "mesh_suggestions": [],
+                    "total_count": 0,
+                    "total_pages": 1,
+                    "error": None,
+                    "warning": None,
+                    "epmc_next_url": None,
+                    "epmc_last_url": None,
+                    "epmc_export_url_csv": None,
+                    "epmc_export_url_ris": None,
+                    "epmc_building": False,
+                }
+            )
             return templates.TemplateResponse(request, "results.html", ctx)
         year_min_i = _safe_int(year_min, None)
         year_max_i = _safe_int(year_max, None)
@@ -1327,8 +1423,16 @@ async def search(
 
             if not deep_paging_possible:
                 ctx = _template_base_context(
-                    request, q=q, source=source, n=n, page=page_i, sort=ui_sort,
-                    year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+                    request,
+                    q=q,
+                    source=source,
+                    n=n,
+                    page=page_i,
+                    sort=ui_sort,
+                    year_min=year_min,
+                    year_max=year_max,
+                    has_abstract=has_abstract,
+                    mesh=mesh,
                 )
 
                 ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
@@ -1404,8 +1508,16 @@ async def search(
             built_up_to_chunk = int(meta.get("built_up_to_chunk") or "0")
 
             ctx = _template_base_context(
-                request, q=q, source=source, n=n, page=page_i, sort=ui_sort,
-                year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+                request,
+                q=q,
+                source=source,
+                n=n,
+                page=page_i,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
             )
 
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
@@ -1501,7 +1613,7 @@ async def search(
                 mesh=mesh,
             )
 
-        ep_papers = (collected or [])[in_chunk_offset: in_chunk_offset + int(n)]
+        ep_papers = (collected or [])[in_chunk_offset : in_chunk_offset + int(n)]
         papers = [_paper_to_dict(p, source="europe_pmc") for p in ep_papers]
 
         logger.info(
@@ -1521,7 +1633,9 @@ async def search(
         else:
             warning = None
 
-        total_pages_raw = max(1, math.ceil(max(0, int(total_count or 0)) / max(1, int(n))))
+        total_pages_raw = max(
+            1, math.ceil(max(0, int(total_count or 0)) / max(1, int(n)))
+        )
         total_pages = min(total_pages_raw, EUROPE_PMC_MAX_PAGES)
 
         epmc_next_url = None
@@ -1614,29 +1728,38 @@ async def search(
         )
 
         ctx = _template_base_context(
-            request, q=q, source=source, n=n, page=page_i, sort=ui_sort,
-            year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+            request,
+            q=q,
+            source=source,
+            n=n,
+            page=page_i,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
         )
 
         ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
         ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
-        ctx.update({
-            "papers": papers,
-            "mesh_suggestions": [],
-            "total_count": int(total_count or 0),
-            "total_pages": total_pages,
-            "error": None,
-            "warning": warning,
-            "allow_deep_paging": deep_paging_possible,
-            "epmc_building": False,
-            "epmc_next_url": epmc_next_url,
-            "epmc_last_url": epmc_last_url,
-            "epmc_export_url_csv": epmc_export_url_csv,
-            "epmc_export_url_ris": epmc_export_url_ris,
-        })
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "total_count": int(total_count or 0),
+                "total_pages": total_pages,
+                "error": None,
+                "warning": warning,
+                "allow_deep_paging": deep_paging_possible,
+                "epmc_building": False,
+                "epmc_next_url": epmc_next_url,
+                "epmc_last_url": epmc_last_url,
+                "epmc_export_url_csv": epmc_export_url_csv,
+                "epmc_export_url_ris": epmc_export_url_ris,
+            }
+        )
         return templates.TemplateResponse(request, "results.html", ctx)
-
 
     # --------------------------
     # OPENALEX
@@ -1654,23 +1777,33 @@ async def search(
 
         if not q:
             ctx = _template_base_context(
-                request, q=q, source="openalex", n=n, page=1, sort=ui_sort,
-                year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+                request,
+                q=q,
+                source="openalex",
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
             )
 
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
             ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
-            ctx.update({
-                "papers": [],
-                "mesh_suggestions": [],
-                "total_count": 0,
-                "total_pages": 1,
-                "error": None,
-                "warning": None,
-                "next_url": None,
-                "last_url": None,
-            })
+            ctx.update(
+                {
+                    "papers": [],
+                    "mesh_suggestions": [],
+                    "total_count": 0,
+                    "total_pages": 1,
+                    "error": None,
+                    "warning": None,
+                    "next_url": None,
+                    "last_url": None,
+                }
+            )
             return templates.TemplateResponse(request, "results.html", ctx)
 
         redis = getattr(request.app.state, "redis", None)
@@ -1694,16 +1827,33 @@ async def search(
 
         if not (ok_tenant and ok_global):
             ctx = _template_base_context(
-                request, q=q, source="openalex", n=n, page=1, sort=ui_sort,
-                year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+                request,
+                q=q,
+                source="openalex",
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
             )
 
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
             ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
-            ctx.update({"papers": [], "mesh_suggestions": [], "total_count": 0, "total_pages": 1,
-                        "error": None, "warning": "OpenAlex rate limit reached. Please retry shortly.",
-                        "next_url": None, "last_url": None})
+            ctx.update(
+                {
+                    "papers": [],
+                    "mesh_suggestions": [],
+                    "total_count": 0,
+                    "total_pages": 1,
+                    "error": None,
+                    "warning": "OpenAlex rate limit reached. Please retry shortly.",
+                    "next_url": None,
+                    "last_url": None,
+                }
+            )
             return templates.TemplateResponse(request, "results.html", ctx)
 
         per_page = max(1, int(n))
@@ -1714,7 +1864,13 @@ async def search(
 
         ck_meta = make_cache_key(
             "cache:openalex:meta",
-            {"q": q, "n": per_page, "sort": ui_sort, "year_min": year_min_i, "year_max": year_max_i},
+            {
+                "q": q,
+                "n": per_page,
+                "sort": ui_sort,
+                "year_min": year_min_i,
+                "year_max": year_max_i,
+            },
         )
         cached_meta = await cache_get_json(redis, ck_meta)
         if cached_meta and "total_count" in cached_meta:
@@ -1729,7 +1885,9 @@ async def search(
                 year_min=year_min_i,
                 year_max=year_max_i,
             )
-            await cache_set_json(redis, ck_meta, {"total_count": int(total_count)}, OPENALEX_CACHE_TTL_S)
+            await cache_set_json(
+                redis, ck_meta, {"total_count": int(total_count)}, OPENALEX_CACHE_TTL_S
+            )
 
         total_pages_raw = max(1, math.ceil(max(0, total_count) / per_page))
         max_basic_pages = max(1, math.ceil(OPENALEX_BASIC_PAGING_LIMIT / per_page))
@@ -1746,14 +1904,30 @@ async def search(
             return RedirectResponse(
                 url=_build_url(
                     "/search",
-                    {"q": q, "source": "openalex", "n": n, "page": page_i, "sort": ui_sort,
-                     "year_min": year_min, "year_max": year_max, "has_abstract": has_abstract, "mesh": mesh},
+                    {
+                        "q": q,
+                        "source": "openalex",
+                        "n": n,
+                        "page": page_i,
+                        "sort": ui_sort,
+                        "year_min": year_min,
+                        "year_max": year_max,
+                        "has_abstract": has_abstract,
+                        "mesh": mesh,
+                    },
                 )
             )
 
         ck_page = make_cache_key(
             "cache:openalex:page",
-            {"q": q, "page": page_i, "n": per_page, "sort": ui_sort, "year_min": year_min_i, "year_max": year_max_i},
+            {
+                "q": q,
+                "page": page_i,
+                "n": per_page,
+                "sort": ui_sort,
+                "year_min": year_min_i,
+                "year_max": year_max_i,
+            },
         )
         cached_page = await cache_get_json(redis, ck_page)
         cached_page = None
@@ -1765,7 +1939,9 @@ async def search(
         )
 
         if cached_page and isinstance(cached_page.get("papers"), list):
-            oa_papers = [Paper.from_dict(d) for d in cached_page["papers"] if isinstance(d, dict)]
+            oa_papers = [
+                Paper.from_dict(d) for d in cached_page["papers"] if isinstance(d, dict)
+            ]
         else:
             oa_papers, _ = await _run_sync(
                 openalex_search,
@@ -1776,7 +1952,12 @@ async def search(
                 year_min=year_min_i,
                 year_max=year_max_i,
             )
-            await cache_set_json(redis, ck_page, {"papers": [p.to_dict() for p in (oa_papers or [])]}, OPENALEX_CACHE_TTL_S)
+            await cache_set_json(
+                redis,
+                ck_page,
+                {"papers": [p.to_dict() for p in (oa_papers or [])]},
+                OPENALEX_CACHE_TTL_S,
+            )
 
         papers = [_paper_to_dict(p, source="openalex") for p in (oa_papers or [])]
         papers = papers[:per_page]
@@ -1791,30 +1972,56 @@ async def search(
 
         concept_suggestions = _extract_concept_suggestions(papers, limit=10)
 
-        base_params = {"q": q, "source": "openalex", "n": n, "sort": ui_sort,
-                    "year_min": year_min, "year_max": year_max, "has_abstract": has_abstract, "mesh": mesh}
-        next_url = _build_url("/search", {**base_params, "page": page_i + 1}) if page_i < total_pages else None
-        last_url = _build_url("/search", {**base_params, "page": total_pages}) if total_pages > 1 else None
+        base_params = {
+            "q": q,
+            "source": "openalex",
+            "n": n,
+            "sort": ui_sort,
+            "year_min": year_min,
+            "year_max": year_max,
+            "has_abstract": has_abstract,
+            "mesh": mesh,
+        }
+        next_url = (
+            _build_url("/search", {**base_params, "page": page_i + 1})
+            if page_i < total_pages
+            else None
+        )
+        last_url = (
+            _build_url("/search", {**base_params, "page": total_pages})
+            if total_pages > 1
+            else None
+        )
 
         ctx = _template_base_context(
-            request, q=q, source="openalex", n=n, page=page_i, sort=ui_sort,
-            year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+            request,
+            q=q,
+            source="openalex",
+            n=n,
+            page=page_i,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
         )
 
         ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
         ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
-        ctx.update({
-            "papers": papers,
-            "mesh_suggestions": [],
-            "concept_suggestions": concept_suggestions,
-            "total_count": total_count,
-            "total_pages": total_pages,
-            "error": None,
-            "warning": warning,
-            "next_url": next_url,
-            "last_url": last_url,
-        })
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": concept_suggestions,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "error": None,
+                "warning": warning,
+                "next_url": next_url,
+                "last_url": last_url,
+            }
+        )
         return templates.TemplateResponse(request, "results.html", ctx)
 
     # --------------------------
@@ -1833,22 +2040,32 @@ async def search(
 
         if not q:
             ctx = _template_base_context(
-                request, q=q, source="crossref", n=n, page=1, sort=ui_sort,
-                year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+                request,
+                q=q,
+                source="crossref",
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
             )
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
             ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
-            ctx.update({
-                "papers": [],
-                "mesh_suggestions": [],
-                "concept_suggestions": [],
-                "total_count": 0,
-                "total_pages": 1,
-                "error": None,
-                "warning": None,
-                "next_url": None,
-                "last_url": None,
-            })
+            ctx.update(
+                {
+                    "papers": [],
+                    "mesh_suggestions": [],
+                    "concept_suggestions": [],
+                    "total_count": 0,
+                    "total_pages": 1,
+                    "error": None,
+                    "warning": None,
+                    "next_url": None,
+                    "last_url": None,
+                }
+            )
             return templates.TemplateResponse(request, "results.html", ctx)
 
         per_page = max(1, int(n))
@@ -1883,28 +2100,46 @@ async def search(
             "mesh": mesh,
         }
 
-        next_url = _build_url("/search", {**base_params, "page": page_i + 1}) if page_i < total_pages else None
-        last_url = _build_url("/search", {**base_params, "page": total_pages}) if total_pages > 1 else None
+        next_url = (
+            _build_url("/search", {**base_params, "page": page_i + 1})
+            if page_i < total_pages
+            else None
+        )
+        last_url = (
+            _build_url("/search", {**base_params, "page": total_pages})
+            if total_pages > 1
+            else None
+        )
 
         ctx = _template_base_context(
-            request, q=q, source="crossref", n=n, page=page_i, sort=ui_sort,
-            year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh
+            request,
+            q=q,
+            source="crossref",
+            n=n,
+            page=page_i,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
         )
 
         ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
         ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
-        ctx.update({
-            "papers": papers,
-            "mesh_suggestions": [],
-            "concept_suggestions": [],
-            "total_count": total_count,
-            "total_pages": total_pages,
-            "error": None,
-            "warning": warning,
-            "next_url": next_url,
-            "last_url": last_url,
-        })
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "error": None,
+                "warning": warning,
+                "next_url": next_url,
+                "last_url": last_url,
+            }
+        )
         return templates.TemplateResponse(request, "results.html", ctx)
 
     # --------------------------
@@ -1914,7 +2149,10 @@ async def search(
         page_i = max(1, int(page))
 
         has_abstract_flag = str(has_abstract).strip().lower() in {
-            "1", "true", "yes", "on"
+            "1",
+            "true",
+            "yes",
+            "on",
         }
 
         ss_year_min_i = _safe_int(year_min, None)
@@ -1962,70 +2200,80 @@ async def search(
                 mesh=mesh,
             )
 
-            ctx.update({
-                "papers": [],
-                "mesh_suggestions": [],
-                "concept_suggestions": [],
-                "total_count": 0,
-                "total_pages": 1,
-                "error": str(exc),
-                "warning": None,
-                "next_url": None,
-                "last_url": None,
-            })
+            ctx.update(
+                {
+                    "papers": [],
+                    "mesh_suggestions": [],
+                    "concept_suggestions": [],
+                    "total_count": 0,
+                    "total_pages": 1,
+                    "error": str(exc),
+                    "warning": None,
+                    "next_url": None,
+                    "last_url": None,
+                }
+            )
 
             return templates.TemplateResponse(request, "results.html", ctx)
 
         papers = [
-            _paper_to_dict(p, source="semantic_scholar")
-            for p in (ss_papers or [])
+            _paper_to_dict(p, source="semantic_scholar") for p in (ss_papers or [])
         ]
 
         total_pages = max(1, math.ceil(int(total_count or 0) / int(n)))
 
         if ss_mode == "bulk":
             next_url = (
-                _build_url("/search", {
-                    "q": q,
-                    "source": "semantic_scholar",
-                    "n": n,
-                    "page": page_i + 1,
-                    "sort": ui_sort,
-                    "token": next_token,
-                    "year_min": year_min,
-                    "year_max": year_max,
-                    "has_abstract": has_abstract,
-                })
+                _build_url(
+                    "/search",
+                    {
+                        "q": q,
+                        "source": "semantic_scholar",
+                        "n": n,
+                        "page": page_i + 1,
+                        "sort": ui_sort,
+                        "token": next_token,
+                        "year_min": year_min,
+                        "year_max": year_max,
+                        "has_abstract": has_abstract,
+                    },
+                )
                 if next_token
                 else None
             )
         else:
             next_url = (
-                _build_url("/search", {
-                    "q": q,
-                    "source": "semantic_scholar",
-                    "n": n,
-                    "page": page_i + 1,
-                    "sort": ui_sort,
-                    "year_min": year_min,
-                    "year_max": year_max,
-                    "has_abstract": has_abstract,
-                })
+                _build_url(
+                    "/search",
+                    {
+                        "q": q,
+                        "source": "semantic_scholar",
+                        "n": n,
+                        "page": page_i + 1,
+                        "sort": ui_sort,
+                        "year_min": year_min,
+                        "year_max": year_max,
+                        "has_abstract": has_abstract,
+                    },
+                )
                 if page_i < total_pages
                 else None
             )
 
         last_url = (
-            _build_url("/search", {
-                "q": q,
-                "source": "semantic_scholar",
-                "n": n,
-                "page": total_pages,
-                "sort": ui_sort,
-                "year_min": year_min,
-                "year_max": year_max,
-                "has_abstract": has_abstract,
-            })
+            _build_url(
+                "/search",
+                {
+                    "q": q,
+                    "source": "semantic_scholar",
+                    "n": n,
+                    "page": total_pages,
+                    "sort": ui_sort,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                    "has_abstract": has_abstract,
+                },
+            )
             if total_pages > 1
             else None
         )
@@ -2043,24 +2291,25 @@ async def search(
             mesh=mesh,
         )
 
-        ctx.update({
-            "papers": papers,
-            "mesh_suggestions": [],
-            "concept_suggestions": [],
-            "total_count": total_count,
-            "total_pages": total_pages,
-            "error": None,
-            "warning": (
-                "Semantic Scholar relevance mode is active."
-                if ss_mode == "relevance"
-                else None
-            ),
-            "next_url": next_url,
-            "last_url": last_url,
-        })
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "error": None,
+                "warning": (
+                    "Semantic Scholar relevance mode is active."
+                    if ss_mode == "relevance"
+                    else None
+                ),
+                "next_url": next_url,
+                "last_url": last_url,
+            }
+        )
 
         return templates.TemplateResponse(request, "results.html", ctx)
-
 
     # --------------------------
     # PUBMED (default)
@@ -2111,16 +2360,18 @@ async def search(
         ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
         ctx["mesh_mode"] = mesh_mode
-        ctx.update({
-            "papers": [],
-            "mesh_suggestions": [],
-            "total_count": 0,
-            "total_pages": 1,
-            "error": None,
-            "warning": None,
-            "next_url": None,
-            "last_url": None,
-        })
+        ctx.update(
+            {
+                "papers": [],
+                "mesh_suggestions": [],
+                "total_count": 0,
+                "total_pages": 1,
+                "error": None,
+                "warning": None,
+                "next_url": None,
+                "last_url": None,
+            }
+        )
         return templates.TemplateResponse(request, "results.html", ctx)
 
     requested_page = max(1, int(page))
@@ -2212,8 +2463,16 @@ async def search(
         "mesh_mode": mesh_mode if (mesh or "").strip() else None,
     }
 
-    next_url = _build_url("/search", {**base_params, "page": capped_page + 1}) if capped_page < total_pages_capped else None
-    last_url = _build_url("/search", {**base_params, "page": total_pages_capped}) if total_pages_capped > 1 else None
+    next_url = (
+        _build_url("/search", {**base_params, "page": capped_page + 1})
+        if capped_page < total_pages_capped
+        else None
+    )
+    last_url = (
+        _build_url("/search", {**base_params, "page": total_pages_capped})
+        if total_pages_capped > 1
+        else None
+    )
 
     ctx = _template_base_context(
         request,
@@ -2232,16 +2491,18 @@ async def search(
     ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
 
     ctx["mesh_mode"] = mesh_mode
-    ctx.update({
-        "papers": papers_dicts,
-        "mesh_suggestions": mesh_suggestions,
-        "total_count": total_count,
-        "total_pages": total_pages_capped,
-        "error": None,
-        "warning": warning,
-        "next_url": next_url,
-        "last_url": last_url,
-    })
+    ctx.update(
+        {
+            "papers": papers_dicts,
+            "mesh_suggestions": mesh_suggestions,
+            "total_count": total_count,
+            "total_pages": total_pages_capped,
+            "error": None,
+            "warning": warning,
+            "next_url": next_url,
+            "last_url": last_url,
+        }
+    )
 
     return templates.TemplateResponse(request, "results.html", ctx)
 
@@ -2249,6 +2510,7 @@ async def search(
 # =========================================================
 # Async export (ARQ job + download) - unchanged interface
 # =========================================================
+
 
 @app.post("/export/job")
 async def create_export_job(
@@ -2326,7 +2588,9 @@ async def create_export_job(
     )
     await ARQ_REDIS.expire(key, 24 * 3600)
 
-    await ARQ_REDIS.enqueue_job("run_export_job", job_id=job_id, _job_id=f"export:{job_id}")
+    await ARQ_REDIS.enqueue_job(
+        "run_export_job", job_id=job_id, _job_id=f"export:{job_id}"
+    )
 
     return {
         "job_id": job_id,
@@ -2362,7 +2626,11 @@ async def get_export_job(job_id: str):
         "message": meta.get("message") or "",
         "file_path": meta.get("file_path") or "",
         "download_token": download_token,
-        "download_url": f"/export/download/{job_id}?token={download_token}" if download_token else "",
+        "download_url": (
+            f"/export/download/{job_id}?token={download_token}"
+            if download_token
+            else ""
+        ),
         "last_error": meta.get("last_error") or "",
         "updated_at": meta.get("updated_at") or "",
         "created_at": meta.get("created_at") or "",
@@ -2401,6 +2669,7 @@ async def download_export(job_id: str, token: str):
 # =========================================================
 # Sync export (page/bulk) - CSV/RIS/XLSX
 # =========================================================
+
 
 @app.get("/export/{fmt}")
 async def export(
@@ -2467,14 +2736,22 @@ async def export(
     if source == "all":
         raise HTTPException(
             status_code=400,
-            detail="All-sources export is only available via async export job."
+            detail="All-sources export is only available via async export job.",
         )
 
     # OPENALEX
     elif source == "openalex":
         if scope == "bulk":
-            cache_key = make_cache_key("export:openalex:bulk", {"q": q, "limit": bulk_limit, "sort": ui_sort,
-                                                               "year_min": year_min, "year_max": year_max})
+            cache_key = make_cache_key(
+                "export:openalex:bulk",
+                {
+                    "q": q,
+                    "limit": bulk_limit,
+                    "sort": ui_sort,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                },
+            )
             cached = await cache_get_json(redis, cache_key) if redis else None
             if cached:
                 papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
@@ -2486,8 +2763,10 @@ async def export(
                 while len(out) < bulk_limit:
                     need = min(page_size, bulk_limit - len(out))
                     batch, _total = await _run_sync(
-                        openalex_search, q,
-                        page=page_i, n=need,
+                        openalex_search,
+                        q,
+                        page=page_i,
+                        n=need,
                         sort=openalex_sort,
                         year_min=_safe_int(year_min, None),
                         year_max=_safe_int(year_max, None),
@@ -2498,32 +2777,55 @@ async def export(
                     page_i += 1
                 papers = out[:bulk_limit]
                 if redis:
-                    await cache_set_json(redis, cache_key, [p.to_dict() for p in papers], 900)
+                    await cache_set_json(
+                        redis, cache_key, [p.to_dict() for p in papers], 900
+                    )
         else:
-            cache_key = make_cache_key("export:openalex:page", {"q": q, "page": page, "n": n, "sort": ui_sort,
-                                                               "year_min": year_min, "year_max": year_max})
+            cache_key = make_cache_key(
+                "export:openalex:page",
+                {
+                    "q": q,
+                    "page": page,
+                    "n": n,
+                    "sort": ui_sort,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                },
+            )
             cached = await cache_get_json(redis, cache_key) if redis else None
             if cached:
                 papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
             else:
                 papers, _ = await _run_sync(
-                    openalex_search, q,
-                    page=page, n=n,
+                    openalex_search,
+                    q,
+                    page=page,
+                    n=n,
                     sort=openalex_sort,
                     year_min=_safe_int(year_min, None),
                     year_max=_safe_int(year_max, None),
                 )
                 papers = papers or []
                 if redis:
-                    await cache_set_json(redis, cache_key, [p.to_dict() for p in papers], 600)
+                    await cache_set_json(
+                        redis, cache_key, [p.to_dict() for p in papers], 600
+                    )
 
     # PUBMED
     elif source == "pubmed":
         if scope == "bulk":
             cache_key = make_cache_key(
                 "export:pubmed:bulk",
-                {"q": q, "limit": bulk_limit, "sort": ui_sort, "year_min": year_min, "year_max": year_max,
-                 "has_abstract": has_abstract, "mesh": mesh, "mesh_mode": mesh_mode},
+                {
+                    "q": q,
+                    "limit": bulk_limit,
+                    "sort": ui_sort,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                    "has_abstract": has_abstract,
+                    "mesh": mesh,
+                    "mesh_mode": mesh_mode,
+                },
             )
             cached = await cache_get_json(redis, cache_key) if redis else None
             if cached:
@@ -2542,18 +2844,38 @@ async def export(
                 else:
                     out: list[Paper] = []
                     retstart = 0
-                    while len(out) < bulk_limit and retstart < PUBMED_MAX_PAGEABLE_RESULTS:
-                        want = min(1000, bulk_limit - len(out), PUBMED_MAX_PAGEABLE_RESULTS - retstart)
-                        res = await pubmed_search_page(term, max_results=want, retstart=retstart, sort=pubmed_sort,
-                                                      api_key=NCBI_API_KEY, tool=TOOL_NAME, email=CONTACT_EMAIL)
+                    while (
+                        len(out) < bulk_limit and retstart < PUBMED_MAX_PAGEABLE_RESULTS
+                    ):
+                        want = min(
+                            1000,
+                            bulk_limit - len(out),
+                            PUBMED_MAX_PAGEABLE_RESULTS - retstart,
+                        )
+                        res = await pubmed_search_page(
+                            term,
+                            max_results=want,
+                            retstart=retstart,
+                            sort=pubmed_sort,
+                            api_key=NCBI_API_KEY,
+                            tool=TOOL_NAME,
+                            email=CONTACT_EMAIL,
+                        )
                         if not res.pmids:
                             break
-                        fetched = await pubmed_fetch_details(res.pmids, api_key=NCBI_API_KEY, tool=TOOL_NAME, email=CONTACT_EMAIL)
+                        fetched = await pubmed_fetch_details(
+                            res.pmids,
+                            api_key=NCBI_API_KEY,
+                            tool=TOOL_NAME,
+                            email=CONTACT_EMAIL,
+                        )
                         out.extend(fetched or [])
                         retstart += want
                     papers = out[:bulk_limit]
                 if redis:
-                    await cache_set_json(redis, cache_key, [p.to_dict() for p in papers], 900)
+                    await cache_set_json(
+                        redis, cache_key, [p.to_dict() for p in papers], 900
+                    )
         else:
             term = build_pubmed_term(
                 q,
@@ -2572,19 +2894,42 @@ async def export(
             else:
                 cache_key = make_cache_key(
                     "export:pubmed:page",
-                    {"q": q, "page": page, "n": n, "sort": ui_sort, "year_min": year_min, "year_max": year_max,
-                     "has_abstract": has_abstract, "mesh": mesh, "mesh_mode": mesh_mode},
+                    {
+                        "q": q,
+                        "page": page,
+                        "n": n,
+                        "sort": ui_sort,
+                        "year_min": year_min,
+                        "year_max": year_max,
+                        "has_abstract": has_abstract,
+                        "mesh": mesh,
+                        "mesh_mode": mesh_mode,
+                    },
                 )
                 cached = await cache_get_json(redis, cache_key) if redis else None
                 if cached:
                     papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
                 else:
-                    res = await pubmed_search_page(term, max_results=n, retstart=retstart, sort=pubmed_sort,
-                                                  api_key=NCBI_API_KEY, tool=TOOL_NAME, email=CONTACT_EMAIL)
-                    papers = await pubmed_fetch_details(res.pmids, api_key=NCBI_API_KEY, tool=TOOL_NAME, email=CONTACT_EMAIL)
+                    res = await pubmed_search_page(
+                        term,
+                        max_results=n,
+                        retstart=retstart,
+                        sort=pubmed_sort,
+                        api_key=NCBI_API_KEY,
+                        tool=TOOL_NAME,
+                        email=CONTACT_EMAIL,
+                    )
+                    papers = await pubmed_fetch_details(
+                        res.pmids,
+                        api_key=NCBI_API_KEY,
+                        tool=TOOL_NAME,
+                        email=CONTACT_EMAIL,
+                    )
                     papers = papers or []
                     if redis:
-                        await cache_set_json(redis, cache_key, [p.to_dict() for p in papers], 600)
+                        await cache_set_json(
+                            redis, cache_key, [p.to_dict() for p in papers], 600
+                        )
 
     # EUROPE PMC
     elif source == "europe_pmc":
@@ -2632,14 +2977,18 @@ async def export(
                     cursor = nxt
                 papers = out[:bulk_limit]
                 if redis:
-                    await cache_set_json(redis, cache_key, [p.to_dict() for p in papers], 900)
+                    await cache_set_json(
+                        redis, cache_key, [p.to_dict() for p in papers], 900
+                    )
         else:
             PAGE_CAP = 100
             cursor = (params.get("cursor") or "").strip() or None
             if not cursor:
                 cursor = "*" if page == 1 else None
             if not cursor:
-                raise HTTPException(400, "Europe PMC page export requires cursor for page>1.")
+                raise HTTPException(
+                    400, "Europe PMC page export requires cursor for page>1."
+                )
 
             offset = (page - 1) * n
             cur = cursor
@@ -2663,7 +3012,9 @@ async def export(
                 remaining -= step
 
             if not cur:
-                raise HTTPException(502, "Europe PMC could not advance cursor to requested page.")
+                raise HTTPException(
+                    502, "Europe PMC could not advance cursor to requested page."
+                )
 
             fetch_n = min(n, PAGE_CAP)
             ep_papers, _total, _next_cursor = await _europe_pmc_search_compat_async(
@@ -2718,12 +3069,17 @@ async def export(
 
     # SEMANTIC SCHOLAR
     elif source == "semantic_scholar":
-        has_abstract_flag = str(has_abstract).strip().lower() in {"1", "true", "yes", "on"}
+        has_abstract_flag = str(has_abstract).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
 
         if ss_mode == "relevance" and bulk_limit > 1000:
             raise HTTPException(
                 status_code=422,
-                detail="Semantic Scholar relevance export is limited to the first 1000 results. Use Most recent first or Oldest first for larger exports."
+                detail="Semantic Scholar relevance export is limited to the first 1000 results. Use Most recent first or Oldest first for larger exports.",
             )
 
         try:
@@ -2743,7 +3099,9 @@ async def export(
                     )
                     cached = await cache_get_json(redis, cache_key) if redis else None
                     if cached:
-                        papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
+                        papers = [
+                            Paper.from_dict(d) for d in cached if isinstance(d, dict)
+                        ]
                     else:
                         out: list[Paper] = []
                         token: str | None = None
@@ -2800,7 +3158,9 @@ async def export(
                     )
                     cached = await cache_get_json(redis, cache_key) if redis else None
                     if cached:
-                        papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
+                        papers = [
+                            Paper.from_dict(d) for d in cached if isinstance(d, dict)
+                        ]
                     else:
                         papers, _total, _next_token = await _run_sync(
                             search_semantic_scholar_bulk,
@@ -2841,7 +3201,9 @@ async def export(
                     )
                     cached = await cache_get_json(redis, cache_key) if redis else None
                     if cached:
-                        papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
+                        papers = [
+                            Paper.from_dict(d) for d in cached if isinstance(d, dict)
+                        ]
                     else:
                         out: list[Paper] = []
                         page_i = 1
@@ -2882,7 +3244,9 @@ async def export(
                     )
                     cached = await cache_get_json(redis, cache_key) if redis else None
                     if cached:
-                        papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
+                        papers = [
+                            Paper.from_dict(d) for d in cached if isinstance(d, dict)
+                        ]
                     else:
                         papers, _ = await _run_sync(
                             search_semantic_scholar,

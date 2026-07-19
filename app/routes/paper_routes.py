@@ -21,6 +21,8 @@ async def paper_detail(request: Request, source: str, pid: str):
     if not paper:
         raise HTTPException(status_code=404, detail="Not Found")
 
+    paper = await state.enrich_paper_detail(paper)
+
     d = build_paper_detail_dict(
         paper,
         source=source,
