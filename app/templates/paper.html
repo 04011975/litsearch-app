@@ -85,6 +85,25 @@
       </div>
     {% endif %}
 
+    {% if paper.citation_count is not none or paper.reference_count is not none %}
+      <hr/>
+
+      {% if paper.citation_count is not none %}
+        <div style="margin-bottom:4px;">
+          <strong>Citations:</strong>
+          {{ paper.citation_count }}
+        </div>
+      {% endif %}
+
+      {% if paper.reference_count is not none %}
+        <div>
+          <strong>References:</strong>
+          {{ paper.reference_count }}
+        </div>
+      {% endif %}
+
+    {% endif %}
+
     {% if paper.mesh_terms and paper.mesh_terms|length > 0 %}
       <hr/>
       <div style="font-weight:600; margin-bottom:6px;">MeSH terms</div>
