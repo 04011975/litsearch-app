@@ -93,6 +93,7 @@ from copy import copy
 
 from app.enrichment import enrich_paper
 from app.enrichment.providers.pubmed_mesh import PubMedMeshProvider
+from app.enrichment.providers.opencitations import OpenCitationsProvider
 
 # =========================================================
 # Small helpers
@@ -165,6 +166,7 @@ TOOL_NAME = (os.getenv("TOOL_NAME") or "LitSearch").strip()
 CONTACT_EMAIL = (os.getenv("CONTACT_EMAIL") or "").strip() or None
 
 PUBMED_MESH_PROVIDER = PubMedMeshProvider()
+OPENCITATIONS_PROVIDER = OpenCitationsProvider()
 
 REDIS_URL = (os.getenv("REDIS_URL") or "").strip() or None
 
@@ -646,6 +648,8 @@ def _paper_to_dict(p: Paper, *, source: str) -> dict[str, Any]:
         "publication_date": getattr(p, "publication_date", None) or "",
         "abstract": getattr(p, "abstract", "") or "",
         "doi": doi or "",
+        "citation_count": getattr(p, "citation_count", None),
+        "reference_count": getattr(p, "reference_count", None),
         "mesh_terms": getattr(p, "mesh_terms", []) or [],
         "concepts": getattr(p, "concepts", []) or [],
         "pmcid": pmcid,
@@ -1129,13 +1133,14 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
         return await _run_sync(fetch_semantic_scholar_detail, pid)
     return None
 
-
 async def _enrich_paper_detail(paper: Paper) -> Paper:
     return await enrich_paper(
         paper,
-        providers=[PUBMED_MESH_PROVIDER],
+        providers=[
+            PUBMED_MESH_PROVIDER,
+            OPENCITATIONS_PROVIDER,
+        ],
     )
-
 
 app.state.allowed_sources = ALLOWED_SOURCES
 app.state.fetch_detail_by_source = _fetch_detail_by_source
