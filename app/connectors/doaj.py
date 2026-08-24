@@ -293,3 +293,51 @@ def doaj_search(
             papers.append(paper)
 
     return papers, total
+
+
+def doaj_fetch_detail(article_id: str) -> Paper | None:
+    """
+    Fetch a single DOAJ article by article ID and normalize it to Paper.
+    """
+
+    article_id = (article_id or "").strip()
+    if not article_id:
+        return None
+
+    url = f"https://doaj.org/api/articles/{requests.utils.quote(article_id, safe='')}"
+
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "LitSearch/1.0",
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=TIMEOUT,
+        )
+    except requests.exceptions.Timeout as exc:
+        raise DoajError("DOAJ detail request timed out") from exc
+    except requests.exceptions.RequestException as exc:
+        raise DoajError(f"DOAJ detail request failed: {exc}") from exc
+
+    if response.status_code == 404:
+        return None
+
+    if response.status_code >= 400:
+        body = response.text[:500]
+        raise DoajError(f"DOAJ API error {response.status_code}: {body}")
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise DoajError("DOAJ returned invalid JSON") from exc
+
+    if not isinstance(data, dict):
+        raise DoajError("Unexpected DOAJ detail response format")
+
+    try:
+        return _to_paper(data)
+    except Exception as exc:
+        raise DoajError("Failed to map DOAJ detail record") from exc
