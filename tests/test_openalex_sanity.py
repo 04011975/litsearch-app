@@ -3,6 +3,7 @@ import pytest
 from app.connectors.openalex import openalex_fetch_detail, openalex_search
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_openalex_search_returns_results():
     papers, total = openalex_search(
@@ -18,6 +19,7 @@ async def test_openalex_search_returns_results():
     assert len(papers) > 0
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_openalex_search_date_sort_returns_results():
     papers, total = openalex_search(
@@ -32,6 +34,7 @@ async def test_openalex_search_date_sort_returns_results():
     assert papers
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_openalex_detail_fetch_works():
     papers, total = openalex_search(
@@ -53,6 +56,7 @@ async def test_openalex_detail_fetch_works():
     assert detail.source == "openalex"
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_openalex_abstract_present_for_some_records():
     papers, total = openalex_search(
@@ -69,6 +73,8 @@ async def test_openalex_abstract_present_for_some_records():
     has_any_abstract = any((p.abstract or "").strip() for p in papers)
     assert has_any_abstract
 
+
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_openalex_year_range_semantics():
     papers, total = openalex_search(
