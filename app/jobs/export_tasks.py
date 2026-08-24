@@ -52,6 +52,8 @@ from app.all_sources import (
     all_sources_semantic_scholar_sort_mode,
 )
 
+from app.connectors.doaj import doaj_search
+
 from dataclasses import dataclass
 
 logger = logging.getLogger("litsearch.export")
@@ -69,6 +71,7 @@ SINGLE_EXPORT_SOURCES = {
     "europe_pmc",
     "semantic_scholar",
     "crossref",
+    "doaj"
 }
 
 MULTI_SOURCE_EXPORT_SOURCES = [
@@ -77,6 +80,7 @@ MULTI_SOURCE_EXPORT_SOURCES = [
     "europe_pmc",
     "semantic_scholar",
     "crossref",
+    "doaj"
 ]
 
 SUPPORTED_EXPORT_SOURCES = SINGLE_EXPORT_SOURCES | {"all"}
@@ -1174,6 +1178,69 @@ async def _fetch_crossref_export_records(
 
         for p in batch:
             p.source = "crossref"
+
+        out.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        page_i += 1
+
+    papers = out[:limit]
+
+    return papers, {
+        "total_count": total_count,
+        "page_size": page_size,
+        "pages_fetched": page_i,
+    }
+
+async def _fetch_doaj_export_records(
+    *,
+    r: ArqRedis,
+    job_id: str,
+    source: str,
+    q: str,
+    sort: str,
+    limit: int,
+    meta: dict[str, str],
+    tenant_id: str,
+    cache_stats: dict,
+    metrics,
+):
+    year_min_i = _meta_int(meta, "year_min")
+    year_max_i = _meta_int(meta, "year_max")
+
+    has_abstract = meta.get("has_abstract") in {
+        "1",
+        "true",
+        "True",
+        True,
+    }
+
+    page_size = min(100, max(1, int(limit)))
+
+    out: list[Paper] = []
+    page_i = 1
+    total_count = 0
+
+    while len(out) < limit:
+        batch, total_count = await _run_sync(
+            doaj_search,
+            q,
+            page=page_i,
+            n=page_size,
+            year_min=year_min_i,
+            year_max=year_max_i,
+            has_abstract=has_abstract,
+        )
+
+        if not batch:
+            break
+
+        batch = normalize_papers(batch, source="doaj")
+
+        for p in batch:
+            p.source = "doaj"
 
         out.extend(batch)
 
@@ -2331,6 +2398,23 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
                 source=source,
                 q=q,
                 sort=crossref_sort,
+                limit=limit,
+                meta=meta,
+                tenant_id=tenant_id,
+                cache_stats=cache_stats,
+                metrics=metrics,
+            )
+
+        # =====================================================
+        # DOAJ
+        # =====================================================
+        elif source == "doaj":
+            papers, doaj_meta = await _fetch_doaj_export_records(
+                r=r,
+                job_id=job_id,
+                source=source,
+                q=q,
+                sort=sort,
                 limit=limit,
                 meta=meta,
                 tenant_id=tenant_id,
