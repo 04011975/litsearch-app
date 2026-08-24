@@ -39,6 +39,7 @@ from app.connectors.europe_pmc import (
 )
 from app.connectors.openalex import openalex_fetch_detail, openalex_search
 from app.connectors.crossref import crossref_fetch_detail, crossref_search
+from app.connectors.doaj import doaj_fetch_detail, doaj_search
 from app.connectors.pubmed import (
     build_pubmed_term,
     pubmed_fetch_details,
@@ -195,6 +196,7 @@ ALLOWED_SOURCES = {
     "openalex",
     "semantic_scholar",
     "crossref",
+    "doaj",
     "all",
 }
 SOURCE_PATTERN = "^(" + "|".join(ALLOWED_SOURCES) + ")$"
@@ -338,6 +340,27 @@ SOURCE_SPECIALIZATIONS = {
         "limitations": [
             "abstract coverage varies",
             "metadata quality depends on publisher deposits",
+        ],
+    },
+    "doaj": {
+        "label": "DOAJ",
+        "role": "Open-access journal and article index",
+        "specialization": (
+            "Peer-reviewed open-access journals and article metadata "
+            "across disciplines."
+        ),
+        "search_mode": (
+            "Keyword-based article search across DOAJ metadata. "
+            "MeSH filtering is not available for this source."
+        ),
+        "strengths": [
+            "open-access focus",
+            "CC0 article metadata",
+            "broad disciplinary coverage",
+        ],
+        "limitations": [
+            "coverage limited to journals indexed by DOAJ",
+            "metadata completeness varies by journal",
         ],
     },
     "semantic_scholar": {
@@ -1129,9 +1152,17 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
             logger.exception("Crossref detail failed pid=%s", pid)
             return None
 
+    if source == "doaj":
+        try:
+            return await _run_sync(doaj_fetch_detail, pid)
+        except Exception:
+            logger.exception("DOAJ detail failed pid=%s", pid)
+            return None
+
     elif source == "semantic_scholar":
         return await _run_sync(fetch_semantic_scholar_detail, pid)
     return None
+
 
 async def _enrich_paper_detail(paper: Paper) -> Paper:
     return await enrich_paper(
@@ -1141,6 +1172,7 @@ async def _enrich_paper_detail(paper: Paper) -> Paper:
             OPENCITATIONS_PROVIDER,
         ],
     )
+
 
 app.state.allowed_sources = ALLOWED_SOURCES
 app.state.fetch_detail_by_source = _fetch_detail_by_source
@@ -2145,6 +2177,136 @@ async def search(
                 "last_url": last_url,
             }
         )
+        return templates.TemplateResponse(request, "results.html", ctx)
+
+    # --------------------------
+    # DOAJ
+    # --------------------------
+    if source == "doaj":
+        logger.info(
+            "DOAJ SEARCH request q=%r page=%s n=%s sort=%s year_min=%r year_max=%r",
+            q,
+            page,
+            n,
+            ui_sort,
+            year_min,
+            year_max,
+        )
+
+        if not q:
+            ctx = _template_base_context(
+                request,
+                q=q,
+                source="doaj",
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
+            ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+            ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+            ctx.update(
+                {
+                    "papers": [],
+                    "mesh_suggestions": [],
+                    "concept_suggestions": [],
+                    "total_count": 0,
+                    "total_pages": 1,
+                    "error": None,
+                    "warning": None,
+                    "next_url": None,
+                    "last_url": None,
+                }
+            )
+            return templates.TemplateResponse(request, "results.html", ctx)
+
+        per_page = max(1, int(n))
+        page_i = max(1, int(page))
+
+        year_min_i = _safe_int(year_min, None)
+        year_max_i = _safe_int(year_max, None)
+
+        has_abstract_flag = str(has_abstract).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+        doaj_papers, total_count = await _run_sync(
+            doaj_search,
+            q,
+            page=page_i,
+            n=per_page,
+            year_min=year_min_i,
+            year_max=year_max_i,
+            has_abstract=has_abstract_flag,
+        )
+
+        papers = [_paper_to_dict(p, source="doaj") for p in (doaj_papers or [])]
+        papers = papers[:per_page]
+
+        total_pages = max(
+            1,
+            math.ceil(max(0, int(total_count or 0)) / per_page),
+        )
+
+        base_params = {
+            "q": q,
+            "source": "doaj",
+            "n": n,
+            "sort": ui_sort,
+            "year_min": year_min,
+            "year_max": year_max,
+            "has_abstract": has_abstract,
+            "mesh": mesh,
+        }
+
+        next_url = (
+            _build_url("/search", {**base_params, "page": page_i + 1})
+            if page_i < total_pages
+            else None
+        )
+
+        last_url = (
+            _build_url("/search", {**base_params, "page": total_pages})
+            if total_pages > 1
+            else None
+        )
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="doaj",
+            n=n,
+            page=page_i,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+        ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "error": None,
+                "warning": warning,
+                "next_url": next_url,
+                "last_url": last_url,
+            }
+        )
+
         return templates.TemplateResponse(request, "results.html", ctx)
 
     # --------------------------

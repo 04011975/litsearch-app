@@ -15,6 +15,7 @@ from app.connectors.doaj import (
     _extract_year,
     _has_full_text,
     _to_paper,
+    doaj_fetch_detail,
     doaj_search,
 )
 
@@ -275,3 +276,66 @@ def test_doaj_search_wraps_timeout(mock_get: Mock) -> None:
     mock_get.side_effect = requests.exceptions.Timeout()
     with pytest.raises(DoajError, match="DOAJ request timed out"):
         doaj_search("machine learning")
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_fetch_detail_maps_record(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = SAMPLE_RECORD
+
+    mock_get.return_value = response
+
+    paper = doaj_fetch_detail("000122f776cb4f27b0f575971a4bed38")
+
+    assert paper is not None
+    assert paper.id == "000122f776cb4f27b0f575971a4bed38"
+    assert paper.source == "doaj"
+    assert paper.title.startswith("A feature selection")
+    assert paper.doi == "10.1234/example"
+    assert paper.url == "https://example.org/article"
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_fetch_detail_returns_none_for_404(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 404
+    response.text = "Not found"
+
+    mock_get.return_value = response
+
+    paper = doaj_fetch_detail("missing")
+
+    assert paper is None
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_fetch_detail_raises_on_http_error(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 500
+    response.text = "Internal Server Error"
+
+    mock_get.return_value = response
+
+    with pytest.raises(DoajError, match="DOAJ API error 500"):
+        doaj_fetch_detail("example-id")
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_fetch_detail_raises_on_invalid_json(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.side_effect = ValueError("invalid json")
+
+    mock_get.return_value = response
+
+    with pytest.raises(DoajError, match="DOAJ returned invalid JSON"):
+        doaj_fetch_detail("example-id")
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_fetch_detail_wraps_timeout(mock_get: Mock) -> None:
+    mock_get.side_effect = requests.exceptions.Timeout()
+
+    with pytest.raises(DoajError, match="DOAJ detail request timed out"):
+        doaj_fetch_detail("example-id")
