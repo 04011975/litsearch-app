@@ -23,6 +23,7 @@ from app.connectors.pubmed import (
 )
 from app.connectors.openalex import openalex_search
 from app.connectors.crossref import crossref_search
+from app.connectors.doaj import doaj_search
 from app.connectors.europe_pmc import europe_pmc_search
 from app.connectors.semantic_scholar import (
     search_semantic_scholar,
@@ -132,6 +133,7 @@ def interleave_by_source(items):
         "pubmed",
         "openalex",
         "crossref",
+        "doaj",
         "europe_pmc",
         "semantic_scholar",
     ]
@@ -320,6 +322,50 @@ async def fetch_all_source_candidates(
             logger.exception("ALL: crossref failed")
             return {"source": source, "papers": [], "count": 0, "failed": True}
 
+    async def _fetch_doaj() -> dict[str, Any]:
+        started = time.perf_counter()
+        source = "doaj"
+
+        try:
+            papers, _ = await asyncio.to_thread(
+                doaj_search,
+                q,
+                page=1,
+                n=candidate_n,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+            )
+
+            for p in papers or []:
+                try:
+                    p.source = source
+                except Exception:
+                    pass
+
+            logger.info(
+                "ALL PERF source=%s count=%s elapsed_ms=%s",
+                source,
+                len(papers or []),
+                _elapsed_ms(started),
+            )
+
+            return {
+                "source": source,
+                "papers": papers or [],
+                "count": len(papers or []),
+                "failed": False,
+            }
+
+        except Exception:
+            logger.exception("ALL: doaj failed")
+            return {
+                "source": source,
+                "papers": [],
+                "count": 0,
+                "failed": True,
+            }
+
     async def _fetch_europe_pmc() -> dict[str, Any]:
         started = time.perf_counter()
         source = "europe_pmc"
@@ -401,6 +447,7 @@ async def fetch_all_source_candidates(
         _fetch_pubmed(),
         _fetch_openalex(),
         _fetch_crossref(),
+        _fetch_doaj(),
         _fetch_europe_pmc(),
         _fetch_semantic_scholar(),
     )
@@ -411,6 +458,7 @@ async def fetch_all_source_candidates(
         "pubmed",
         "openalex",
         "crossref",
+        "doaj",
         "europe_pmc",
         "semantic_scholar",
     ]
