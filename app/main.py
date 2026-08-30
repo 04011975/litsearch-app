@@ -682,8 +682,7 @@ def _paper_to_dict(p: Paper, *, source: str) -> dict[str, Any]:
         "external_url": external_url,
     }
 
-    has_full_text = bool(getattr(p, "has_full_text", False))
-    if has_full_text or (pmcid and pmcid.upper().startswith("PMC")):
+    if pmcid and pmcid.upper().startswith("PMC"):
         d["has_full_text"] = True
         d["full_text_label"] = "Full text (PMCID)"
         d["full_text_url"] = _europe_pmc_external_url(p)
