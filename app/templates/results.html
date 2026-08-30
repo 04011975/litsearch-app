@@ -121,10 +121,12 @@
     <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first (chronological mode)</option>
   {% else %}
     <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
-    {% if current_source != "europe_pmc" %}
+
+    {% if current_source not in ["europe_pmc", "doaj"] %}
       <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first</option>
     {% endif %}
-    {% if current_source not in ["europe_pmc", "pubmed"] %}
+
+    {% if current_source not in ["europe_pmc", "pubmed", "doaj"] %}
       <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first</option>
     {% endif %}
   {% endif %}
