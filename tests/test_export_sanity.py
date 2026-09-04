@@ -96,6 +96,131 @@ def test_export_epmc_csv_page(client):
     assert len(text.splitlines()) >= 2
 
 
+def test_export_doaj_csv_page(client, monkeypatch):
+    def fake_doaj_search(
+        q,
+        *,
+        page=1,
+        n=10,
+        year_min=None,
+        year_max=None,
+        has_abstract=False,
+    ):
+        return (
+            [
+                Paper(
+                    id="doaj-test-1",
+                    source="doaj",
+                    title="DOAJ export test paper",
+                    authors=["Test Author"],
+                    journal="Test Journal",
+                    year=2025,
+                    doi="10.1234/doaj-test",
+                    abstract="Test abstract",
+                )
+            ],
+            1,
+        )
+
+    monkeypatch.setattr("app.main.doaj_search", fake_doaj_search)
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "machine learning cancer",
+            "source": "doaj",
+            "scope": "page",
+            "page": 1,
+            "n": 10,
+            "sort": "relevance",
+            "year_min": "2025",
+            "year_max": "2025",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert "text/csv" in r.headers.get("content-type", "")
+
+    text = r.text
+    assert "ID,Title,Authors,Journal,Year,DOI,PMCID,URL" in text
+    assert "DOAJ export test paper" in text
+    assert "10.1234/doaj-test" in text
+    assert len(text.splitlines()) >= 2
+
+
+def test_export_doaj_bulk_requires_async_job(client):
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "machine learning cancer",
+            "source": "doaj",
+            "scope": "bulk",
+            "bulk_limit": 1000,
+        },
+    )
+
+    assert r.status_code == 400
+    assert (
+        r.json()["detail"] == "DOAJ bulk export is only available via async export job."
+    )
+
+
+def test_export_semantic_scholar_csv_page(client, monkeypatch):
+    def fake_search_semantic_scholar(
+        q,
+        *,
+        page=1,
+        n=10,
+        year_min=None,
+        year_max=None,
+        has_abstract=False,
+    ):
+        return (
+            [
+                Paper(
+                    id="ss-test-1",
+                    source="semantic_scholar",
+                    title="Semantic Scholar export test paper",
+                    authors=["Test Author"],
+                    journal="Test Journal",
+                    year=2025,
+                    doi="10.1234/ss-test",
+                    abstract="Test abstract",
+                )
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(
+        "app.main.search_semantic_scholar",
+        fake_search_semantic_scholar,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "machine learning cancer",
+            "source": "semantic_scholar",
+            "scope": "page",
+            "page": 1,
+            "n": 10,
+            "sort": "relevance",
+            "year_min": "2025",
+            "year_max": "2025",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert "text/csv" in r.headers.get("content-type", "")
+
+    text = r.text
+    assert "Semantic Scholar export test paper" in text
+    assert "10.1234/ss-test" in text
+    assert len(text.splitlines()) >= 2
+
+
 def test_export_pubmed_xlsx_page(client):
     r = client.get(
         "/export/xlsx",
@@ -131,6 +256,7 @@ def test_export_pubmed_mesh_mode_preserved_with_mock(client, monkeypatch):
             count = 1
             webenv = "fake"
             query_key = "1"
+
         return FakeRes()
 
     async def fake_pubmed_fetch_details(*args, **kwargs):
@@ -203,4 +329,3 @@ def test_export_rejects_unknown_source(client):
         },
     )
     assert r.status_code == 422
-
