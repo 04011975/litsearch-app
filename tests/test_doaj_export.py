@@ -62,6 +62,8 @@ async def test_fetch_doaj_export_records(mock_doaj_search) -> None:
     assert len(papers) == 2
     assert [paper.source for paper in papers] == ["doaj", "doaj"]
 
+    assert [paper.id for paper in papers] == ["d1", "d2"]
+
     assert metadata["total_count"] == 2
     assert metadata["page_size"] == 20
     assert metadata["pages_fetched"] == 1

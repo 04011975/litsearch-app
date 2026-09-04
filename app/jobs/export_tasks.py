@@ -1237,10 +1237,14 @@ async def _fetch_doaj_export_records(
         if not batch:
             break
 
+        original_ids = [str(getattr(p, "id", "") or "").strip() for p in batch]
+
         batch = normalize_papers(batch, source="doaj")
 
-        for p in batch:
+        for p, original_id in zip(batch, original_ids):
             p.source = "doaj"
+            if original_id:
+                p.id = original_id
 
         out.extend(batch)
 

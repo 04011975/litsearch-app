@@ -3233,6 +3233,32 @@ async def export(
             )
             papers = papers or []
 
+    # DOAJ
+    elif source == "doaj":
+        has_abstract_flag = str(has_abstract).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+        if scope == "bulk":
+            raise HTTPException(
+                status_code=400,
+                detail="DOAJ bulk export is only available via async export job.",
+            )
+
+        papers, _total = await _run_sync(
+            doaj_search,
+            q,
+            page=page,
+            n=n,
+            year_min=year_min_i,
+            year_max=year_max_i,
+            has_abstract=has_abstract_flag,
+        )
+        papers = papers or []
+
     # SEMANTIC SCHOLAR
     elif source == "semantic_scholar":
         has_abstract_flag = str(has_abstract).strip().lower() in {
