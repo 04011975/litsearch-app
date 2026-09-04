@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 from unittest.mock import Mock, patch
 
 import pytest
@@ -182,14 +184,76 @@ def test_doaj_search_maps_response(mock_get: Mock) -> None:
 
 
 @patch("app.connectors.doaj.requests.get")
-def test_doaj_search_applies_year_filter(mock_get: Mock) -> None:
+def test_doaj_search_applies_year_min_server_side(mock_get: Mock) -> None:
     response = Mock()
     response.status_code = 200
     response.json.return_value = {
         "total": 1,
         "results": [SAMPLE_RECORD],
     }
+    mock_get.return_value = response
 
+    doaj_search(
+        "machine learning",
+        year_min=2025,
+    )
+
+    url = unquote(mock_get.call_args.args[0])
+
+    assert "(machine learning) AND bibjson.year:>=2025" in url
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_search_applies_year_max_server_side(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "total": 1,
+        "results": [SAMPLE_RECORD],
+    }
+    mock_get.return_value = response
+
+    doaj_search(
+        "machine learning",
+        year_max=2025,
+    )
+
+    url = unquote(mock_get.call_args.args[0])
+
+    assert "(machine learning) AND bibjson.year:<=2025" in url
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_search_applies_year_range_server_side(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "total": 1,
+        "results": [SAMPLE_RECORD],
+    }
+    mock_get.return_value = response
+
+    doaj_search(
+        "machine learning",
+        year_min=2020,
+        year_max=2025,
+    )
+
+    url = unquote(mock_get.call_args.args[0])
+
+    assert "(machine learning) AND bibjson.year:[2020 TO 2025]" in url
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_search_does_not_reapply_year_filter_locally(
+    mock_get: Mock,
+) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "total": 1,
+        "results": [SAMPLE_RECORD],
+    }
     mock_get.return_value = response
 
     papers, total = doaj_search(
@@ -198,35 +262,58 @@ def test_doaj_search_applies_year_filter(mock_get: Mock) -> None:
     )
 
     assert total == 1
-    assert papers == []
+    assert len(papers) == 1
+    assert papers[0].year == 2025
 
 
 @patch("app.connectors.doaj.requests.get")
-def test_doaj_search_applies_abstract_filter(mock_get: Mock) -> None:
-    record = {
-        **SAMPLE_RECORD,
-        "bibjson": {
-            **SAMPLE_RECORD["bibjson"],
-            "abstract": None,
-        },
-    }
-
+def test_doaj_search_applies_abstract_filter_server_side(
+    mock_get: Mock,
+) -> None:
     response = Mock()
     response.status_code = 200
     response.json.return_value = {
         "total": 1,
-        "results": [record],
+        "results": [SAMPLE_RECORD],
     }
-
     mock_get.return_value = response
 
-    papers, total = doaj_search(
+    doaj_search(
         "machine learning",
         has_abstract=True,
     )
 
-    assert total == 1
-    assert papers == []
+    url = unquote(mock_get.call_args.args[0])
+
+    assert "(machine learning) AND _exists_:bibjson.abstract" in url
+
+
+@patch("app.connectors.doaj.requests.get")
+def test_doaj_search_combines_year_and_abstract_filters_server_side(
+    mock_get: Mock,
+) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "total": 1,
+        "results": [SAMPLE_RECORD],
+    }
+    mock_get.return_value = response
+
+    doaj_search(
+        "machine learning",
+        year_min=2025,
+        year_max=2025,
+        has_abstract=True,
+    )
+
+    url = unquote(mock_get.call_args.args[0])
+
+    assert (
+        "(machine learning) "
+        "AND bibjson.year:[2025 TO 2025] "
+        "AND _exists_:bibjson.abstract"
+    ) in url
 
 
 @patch("app.connectors.doaj.requests.get")
