@@ -182,28 +182,6 @@ def _to_paper(record: dict[str, Any]) -> Paper:
     )
 
 
-def _passes_local_filters(
-    paper: Paper,
-    year_min: int | None,
-    year_max: int | None,
-    has_abstract: bool,
-) -> bool:
-    if has_abstract and not (paper.abstract and paper.abstract.strip()):
-        return False
-
-    year = paper.year
-
-    if year_min is not None:
-        if year is None or year < year_min:
-            return False
-
-    if year_max is not None:
-        if year is None or year > year_max:
-            return False
-
-    return True
-
-
 def doaj_search(
     q: str,
     page: int = 1,
@@ -215,7 +193,8 @@ def doaj_search(
     """
     Search DOAJ articles and normalize results to canonical Paper objects.
 
-    year_min/year_max/has_abstract are applied locally in this first version.
+    year_min/year_max and has_abstract are applied server-side
+    in the DOAJ query.
     """
 
     q = (q or "").strip()
@@ -226,7 +205,24 @@ def doaj_search(
     page = max(1, int(page))
     n = max(1, min(int(n), MAX_PAGE_SIZE))
 
-    url = f"{BASE_URL}/{requests.utils.quote(q, safe='')}"
+    filters: list[str] = []
+
+    if year_min is not None and year_max is not None:
+        filters.append(f"bibjson.year:[{int(year_min)} TO {int(year_max)}]")
+    elif year_min is not None:
+        filters.append(f"bibjson.year:>={int(year_min)}")
+    elif year_max is not None:
+        filters.append(f"bibjson.year:<={int(year_max)}")
+
+    if has_abstract:
+        filters.append("_exists_:bibjson.abstract")
+
+    search_query = q
+
+    if filters:
+        search_query = f"({q}) AND " + " AND ".join(filters)
+
+    url = f"{BASE_URL}/{requests.utils.quote(search_query, safe='')}"
 
     params = {
         "page": page,
@@ -284,13 +280,7 @@ def doaj_search(
             logger.exception("Failed to map DOAJ record")
             continue
 
-        if _passes_local_filters(
-            paper,
-            year_min=year_min,
-            year_max=year_max,
-            has_abstract=has_abstract,
-        ):
-            papers.append(paper)
+        papers.append(paper)
 
     return papers, total
 
@@ -301,10 +291,13 @@ def doaj_fetch_detail(article_id: str) -> Paper | None:
     """
 
     article_id = (article_id or "").strip()
+
     if not article_id:
         return None
 
-    url = f"https://doaj.org/api/articles/{requests.utils.quote(article_id, safe='')}"
+    url = (
+        "https://doaj.org/api/articles/" f"{requests.utils.quote(article_id, safe='')}"
+    )
 
     headers = {
         "Accept": "application/json",
