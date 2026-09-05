@@ -2900,10 +2900,26 @@ async def export(
 
     # ALL SOURCES
     if source == "all":
-        raise HTTPException(
-            status_code=400,
-            detail="All-sources export is only available via async export job.",
+        if scope == "bulk":
+            raise HTTPException(
+                status_code=400,
+                detail="All-sources bulk export is only available via async export job.",
+            )
+
+        result = await build_all_source_results(
+            q=q,
+            sort=ui_sort,
+            limit=None,
+            page=page,
+            n=n,
+            year_min=year_min_i,
+            year_max=year_max_i,
+            has_abstract=has_abstract,
+            mesh=mesh,
+            mesh_mode=mesh_mode,
         )
+
+        papers = result["papers"]
 
     # OPENALEX
     elif source == "openalex":
