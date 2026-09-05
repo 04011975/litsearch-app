@@ -457,7 +457,7 @@
       <option value="100">First 100</option>
       <option value="500">First 500</option>
       <option value="1000" selected>First 1000</option>
-      {% if current_source != "semantic_scholar" or ss_bulk_mode %}
+      {% if current_source != "doaj" and (current_source != "semantic_scholar" or ss_bulk_mode) %}
         <option value="2000">First 2000</option>
       {% endif %}
     </select>
