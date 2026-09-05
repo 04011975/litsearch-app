@@ -329,3 +329,75 @@ def test_export_rejects_unknown_source(client):
         },
     )
     assert r.status_code == 422
+
+
+def test_export_all_sources_csv_page(client, monkeypatch):
+    async def fake_build_all_source_results(**kwargs):
+        assert kwargs["page"] == 2
+        assert kwargs["n"] == 10
+        assert kwargs["sort"] == "relevance"
+        return {
+            "papers": [
+                Paper(
+                    id="all-test-id",
+                    source="openalex",
+                    title="Mock All Sources Paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/all-test",
+                    pmcid=None,
+                    url="https://example.org/all-test",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            "all_papers": [],
+            "total_count": 1,
+            "duplicates_removed": 0,
+            "source_counts": {"openalex": 1},
+            "failed_sources": [],
+        }
+
+    monkeypatch.setattr(
+        "app.main.build_all_source_results",
+        fake_build_all_source_results,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "all",
+            "scope": "page",
+            "page": 2,
+            "n": 10,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert "text/csv" in r.headers.get("content-type", "")
+    assert "Mock All Sources Paper" in r.text
+
+
+def test_export_all_sources_bulk_requires_async_job(client):
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "all",
+            "scope": "bulk",
+            "bulk_limit": 100,
+            "page": 1,
+            "n": 10,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 400
+    assert (
+        r.json()["detail"]
+        == "All-sources bulk export is only available via async export job."
+    )
