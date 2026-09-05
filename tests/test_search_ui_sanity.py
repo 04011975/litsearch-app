@@ -171,3 +171,55 @@ def test_doaj_only_offers_relevance_sort(client, monkeypatch):
     assert '<option value="relevance"' in r.text
     assert '<option value="date_desc"' not in r.text
     assert '<option value="date_asc"' not in r.text
+
+
+def test_doaj_export_limit_stops_at_1000(client, monkeypatch):
+    def fake_doaj_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="doaj-test-id",
+                    source="doaj",
+                    title="Test DOAJ paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doaj.org/article/doaj-test-id",
+                    mesh_terms=[],
+                    has_full_text=True,
+                )
+            ],
+            1,
+        )
+
+    monkeypatch.setattr("app.main.doaj_search", fake_doaj_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "doaj",
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<option value="1000" selected>First 1000</option>' in r.text
+    assert '<option value="2000">First 2000</option>' not in r.text
+
+
+def test_pubmed_export_limit_still_offers_2000(client):
+    r = client.get(
+        "/search",
+        params={
+            "q": "",
+            "source": "pubmed",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<option value="2000">First 2000</option>' in r.text
