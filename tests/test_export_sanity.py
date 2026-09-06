@@ -1,5 +1,6 @@
 import io
 import zipfile
+import pytest
 
 from app.models.paper import Paper
 
@@ -52,6 +53,7 @@ def test_export_pubmed_ris_page(client):
     assert "ER  -" in text
 
 
+@pytest.mark.integration
 def test_export_openalex_csv_page(client):
     r = client.get(
         "/export/csv",
@@ -336,6 +338,8 @@ def test_export_all_sources_csv_page(client, monkeypatch):
         assert kwargs["page"] == 2
         assert kwargs["n"] == 10
         assert kwargs["sort"] == "relevance"
+        assert kwargs["snapshot_id"] == "snapshot-test-123"
+        assert "redis" in kwargs
         return {
             "papers": [
                 Paper(
@@ -374,6 +378,7 @@ def test_export_all_sources_csv_page(client, monkeypatch):
             "page": 2,
             "n": 10,
             "sort": "relevance",
+            "snapshot_id": "snapshot-test-123",
         },
     )
 
