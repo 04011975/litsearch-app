@@ -1236,6 +1236,7 @@ async def search(
     has_abstract: int = Query(0, ge=0, le=1),
     mesh: str = Query(""),
     mesh_mode: str = Query("or"),
+    snapshot_id: str = Query(""),
 ):
 
     logger.info(
@@ -1287,10 +1288,14 @@ async def search(
             has_abstract=has_abstract,
             mesh=mesh,
             mesh_mode="or",
+            redis=getattr(request.app.state, "redis", None),
+            snapshot_id=(snapshot_id or "").strip() or None,
         )
 
         total_count = result["total_count"]
         duplicates_removed = result["duplicates_removed"]
+
+        snapshot_id = result.get("snapshot_id")
 
         combined_papers = [
             _paper_to_dict(
@@ -1323,6 +1328,7 @@ async def search(
             "year_max": year_max,
             "has_abstract": has_abstract,
             "mesh": mesh,
+            "snapshot_id": snapshot_id,
         }
 
         next_url = (
@@ -1361,6 +1367,7 @@ async def search(
                 "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
                 "next_url": next_url,
                 "last_url": last_url,
+                "snapshot_id": snapshot_id,
             }
         )
 
@@ -2862,6 +2869,7 @@ async def export(
     n = export_params.n
     page = export_params.page
     token = export_params.token
+    snapshot_id = export_params.snapshot_id
     ui_sort = export_params.sort
     mesh = export_params.mesh
     year_min = export_params.year_min
@@ -2917,6 +2925,8 @@ async def export(
             has_abstract=has_abstract,
             mesh=mesh,
             mesh_mode=mesh_mode,
+            redis=redis,
+            snapshot_id=snapshot_id,
         )
 
         papers = result["papers"]

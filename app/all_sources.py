@@ -2,8 +2,9 @@ from datetime import datetime
 
 import asyncio
 import logging
-import time
 import os
+import time
+import uuid
 
 logger = logging.getLogger("litsearch.all_sources")
 
@@ -11,10 +12,16 @@ ALL_SOURCES_CANDIDATE_LIMIT = int(
     os.getenv("ALL_SOURCES_CANDIDATE_LIMIT", "2000")
 )
 
+ALL_SOURCES_SNAPSHOT_TTL_SECONDS = int(
+    os.getenv("ALL_SOURCES_SNAPSHOT_TTL_SECONDS", "900")
+)
+
 from typing import Any
 
 from app.models.paper import Paper
 from app.core.deduplication import deduplicate_papers
+
+from app.services.redis_policy import cache_get_json, cache_set_json
 
 from app.connectors.pubmed import (
     build_pubmed_term,
@@ -483,6 +490,102 @@ async def fetch_all_source_candidates(
         "failed_sources": failed_sources,
     }
 
+
+def _all_sources_snapshot_key(snapshot_id: str) -> str:
+    return f"all_sources:snapshot:{snapshot_id}"
+
+
+def _all_sources_snapshot_signature(
+    *,
+    q: str,
+    sort: str,
+    candidate_n: int,
+    year_min: int | None,
+    year_max: int | None,
+    has_abstract: bool,
+    mesh: str,
+    mesh_mode: str,
+) -> str:
+    return "|".join(
+        [
+            "v1",
+            (q or "").strip(),
+            (sort or "").strip(),
+            str(candidate_n),
+            str(year_min) if year_min is not None else "",
+            str(year_max) if year_max is not None else "",
+            "1" if has_abstract else "0",
+            (mesh or "").strip(),
+            (mesh_mode or "or").strip().lower(),
+        ]
+    )
+
+
+async def _load_all_sources_snapshot(
+    redis,
+    snapshot_id: str | None,
+    request_signature: str,
+):
+
+    if redis is None or not snapshot_id:
+        return None
+
+    payload = await cache_get_json(
+        redis,
+        _all_sources_snapshot_key(snapshot_id),
+    )
+
+    if not payload:
+        return None
+
+    if payload.get("request_signature") != request_signature:
+        return None
+
+    try:
+        papers = [
+            Paper.from_dict(item)
+            for item in payload.get("papers", [])
+        ]
+    except (TypeError, ValueError):
+        return None
+
+    return {
+        "papers": papers,
+        "duplicates_removed": int(payload.get("duplicates_removed", 0)),
+        "source_counts": payload.get("source_counts", {}),
+        "failed_sources": payload.get("failed_sources", []),
+    }
+
+
+async def _store_all_sources_snapshot(
+    redis,
+    *,
+    snapshot_id: str,
+    request_signature: str,
+    papers: list[Paper],
+    duplicates_removed: int,
+    source_counts: dict,
+    failed_sources: list,
+) -> bool:
+    if redis is None:
+        return False
+
+    payload = {
+        "papers": [paper.to_dict() for paper in papers],
+        "duplicates_removed": duplicates_removed,
+        "source_counts": source_counts,
+        "failed_sources": failed_sources,
+        "request_signature": request_signature,
+    }
+
+    return await cache_set_json(
+        redis,
+        _all_sources_snapshot_key(snapshot_id),
+        payload,
+        ALL_SOURCES_SNAPSHOT_TTL_SECONDS,
+    )
+
+
 async def build_all_source_results(
     *,
     q: str,
@@ -495,6 +598,8 @@ async def build_all_source_results(
     has_abstract: bool = False,
     mesh: str = "",
     mesh_mode: str = "or",
+    redis=None,
+    snapshot_id: str | None = None,
 ):
     """
     Build deduplicated, centrally sorted All Sources results.
@@ -506,6 +611,48 @@ async def build_all_source_results(
     normalized_sort = normalize_all_sources_sort(sort)
 
     candidate_n = max(int(limit or n), ALL_SOURCES_CANDIDATE_LIMIT)
+
+    request_signature = _all_sources_snapshot_signature(
+        q=q,
+        sort=normalized_sort,
+        candidate_n=candidate_n,
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
+        mesh_mode=mesh_mode,
+    )
+
+    loaded_snapshot = await _load_all_sources_snapshot(
+        redis,
+        snapshot_id,
+        request_signature,
+    )
+
+    if loaded_snapshot is not None:
+        sorted_papers = loaded_snapshot["papers"]
+        duplicates_removed = loaded_snapshot["duplicates_removed"]
+        source_counts = loaded_snapshot["source_counts"]
+        failed_sources = loaded_snapshot["failed_sources"]
+
+        total_count = len(sorted_papers)
+
+        page_i = max(1, int(page or 1))
+        n_i = max(1, int(n or 10))
+        start = (page_i - 1) * n_i
+        end = start + n_i
+
+        page_papers = sorted_papers[start:end]
+
+        return {
+            "papers": page_papers,
+            "all_papers": sorted_papers,
+            "total_count": total_count,
+            "duplicates_removed": duplicates_removed,
+            "source_counts": source_counts,
+            "failed_sources": failed_sources,
+            "snapshot_id": snapshot_id,
+        }
 
     logger.info(
         "ALL PERF candidate_limit=%s candidate_n=%s requested_limit=%s page_size=%s",
@@ -593,6 +740,23 @@ async def build_all_source_results(
         duplicates_removed,
     )
 
+    if redis is not None:
+        new_snapshot_id = uuid.uuid4().hex
+
+        stored = await _store_all_sources_snapshot(
+            redis,
+            snapshot_id=new_snapshot_id,
+            request_signature=request_signature,
+            papers=sorted_papers,
+            duplicates_removed=duplicates_removed,
+            source_counts=source_counts,
+            failed_sources=failed_sources,
+        )
+
+        snapshot_id = new_snapshot_id if stored else None
+    else:
+        snapshot_id = None
+
     return {
         "papers": page_papers,
         "all_papers": sorted_papers,
@@ -600,4 +764,5 @@ async def build_all_source_results(
         "duplicates_removed": duplicates_removed,
         "source_counts": source_counts,
         "failed_sources": failed_sources,
+        "snapshot_id": snapshot_id,
     }

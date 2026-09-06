@@ -445,9 +445,9 @@
         |
         <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}{% if ss_token %}&token={{ ss_token|urlencode }}{% endif %}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}">RIS (current page)</a>
       {% else %}
-        <a href="/export/csv?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">CSV (current page)</a>
+        <a href="/export/csv?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='all' and snapshot_id %}&snapshot_id={{ snapshot_id|urlencode }}{% endif %}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">CSV (current page)</a>
         |
-        <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">RIS (current page)</a>
+        <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='all' and snapshot_id %}&snapshot_id={{ snapshot_id|urlencode }}{% endif %}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">RIS (current page)</a>
       {% endif %}
     {% endif %}
 

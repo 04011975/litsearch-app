@@ -228,3 +228,243 @@ async def test_build_all_source_results_includes_doaj_after_dedup(
         "europe_pmc",
         "semantic_scholar",
     ]
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.data: dict[str, str] = {}
+
+    async def get(self, key: str):
+        return self.data.get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None):
+        self.data[key] = value
+        return True
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.fetch_all_source_candidates")
+async def test_build_all_source_results_reuses_snapshot_across_pages(
+    mock_fetch_all_source_candidates,
+) -> None:
+    from app.all_sources import build_all_source_results
+
+    first_papers = [
+        _paper("p1", "pubmed"),
+        _paper("p2", "pubmed"),
+        _paper("p3", "pubmed"),
+        _paper("p4", "pubmed"),
+    ]
+
+    changed_papers = [
+        _paper("x1", "pubmed"),
+        _paper("x2", "pubmed"),
+        _paper("x3", "pubmed"),
+        _paper("x4", "pubmed"),
+    ]
+
+    mock_fetch_all_source_candidates.side_effect = [
+        {
+            "combined_raw": first_papers,
+            "source_counts": {"pubmed": 4},
+            "failed_sources": [],
+        },
+        {
+            "combined_raw": changed_papers,
+            "source_counts": {"pubmed": 4},
+            "failed_sources": [],
+        },
+    ]
+
+    redis = _FakeRedis()
+
+    page_1 = await build_all_source_results(
+        q="machine learning cancer",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+    )
+
+    snapshot_id = page_1["snapshot_id"]
+
+    page_2 = await build_all_source_results(
+        q="machine learning cancer",
+        sort="relevance",
+        limit=None,
+        page=2,
+        n=2,
+        redis=redis,
+        snapshot_id=snapshot_id,
+    )
+
+    assert snapshot_id
+    assert page_2["snapshot_id"] == snapshot_id
+
+    assert [paper.id for paper in page_1["papers"]] == ["p1", "p2"]
+    assert [paper.id for paper in page_2["papers"]] == ["p3", "p4"]
+
+    assert page_1["total_count"] == 4
+    assert page_2["total_count"] == 4
+
+    assert mock_fetch_all_source_candidates.await_count == 1
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.fetch_all_source_candidates")
+async def test_build_all_source_results_rejects_snapshot_for_different_query(
+    mock_fetch_all_source_candidates,
+) -> None:
+    from app.all_sources import build_all_source_results
+
+    alpha_papers = [
+        _paper("a1", "pubmed"),
+        _paper("a2", "pubmed"),
+    ]
+
+    beta_papers = [
+        _paper("b1", "pubmed"),
+        _paper("b2", "pubmed"),
+    ]
+
+    mock_fetch_all_source_candidates.side_effect = [
+        {
+            "combined_raw": alpha_papers,
+            "source_counts": {"pubmed": 2},
+            "failed_sources": [],
+        },
+        {
+            "combined_raw": beta_papers,
+            "source_counts": {"pubmed": 2},
+            "failed_sources": [],
+        },
+    ]
+
+    redis = _FakeRedis()
+
+    alpha = await build_all_source_results(
+        q="alpha",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+    )
+
+    alpha_snapshot_id = alpha["snapshot_id"]
+
+    beta = await build_all_source_results(
+        q="beta",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+        snapshot_id=alpha_snapshot_id,
+    )
+
+    assert [paper.id for paper in alpha["papers"]] == ["a1", "a2"]
+    assert [paper.id for paper in beta["papers"]] == ["b1", "b2"]
+
+    assert beta["snapshot_id"] != alpha_snapshot_id
+    assert mock_fetch_all_source_candidates.await_count == 2
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.fetch_all_source_candidates")
+async def test_build_all_source_results_does_not_return_snapshot_id_when_store_fails(
+    mock_fetch_all_source_candidates,
+) -> None:
+    from app.all_sources import build_all_source_results
+
+    mock_fetch_all_source_candidates.return_value = {
+        "combined_raw": [
+            _paper("p1", "pubmed"),
+            _paper("p2", "pubmed"),
+        ],
+        "source_counts": {"pubmed": 2},
+        "failed_sources": [],
+    }
+
+    class FailingRedis:
+        async def get(self, key: str):
+            return None
+
+        async def set(self, key: str, value: str, ex: int | None = None):
+            raise RuntimeError("Redis unavailable")
+
+    result = await build_all_source_results(
+        q="cancer",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=FailingRedis(),
+    )
+
+    assert [paper.id for paper in result["papers"]] == ["p1", "p2"]
+    assert result["snapshot_id"] is None
+    assert mock_fetch_all_source_candidates.await_count == 1
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.fetch_all_source_candidates")
+async def test_build_all_source_results_rebuilds_expired_snapshot_with_new_id(
+    mock_fetch_all_source_candidates,
+) -> None:
+    from app.all_sources import build_all_source_results
+
+    first_papers = [
+        _paper("p1", "pubmed"),
+        _paper("p2", "pubmed"),
+    ]
+
+    refreshed_papers = [
+        _paper("x1", "pubmed"),
+        _paper("x2", "pubmed"),
+    ]
+
+    mock_fetch_all_source_candidates.side_effect = [
+        {
+            "combined_raw": first_papers,
+            "source_counts": {"pubmed": 2},
+            "failed_sources": [],
+        },
+        {
+            "combined_raw": refreshed_papers,
+            "source_counts": {"pubmed": 2},
+            "failed_sources": [],
+        },
+    ]
+
+    redis = _FakeRedis()
+
+    first = await build_all_source_results(
+        q="cancer",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+    )
+
+    old_snapshot_id = first["snapshot_id"]
+    assert old_snapshot_id
+
+    # Simulate an expired Redis snapshot.
+    redis.data.clear()
+
+    refreshed = await build_all_source_results(
+        q="cancer",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+        snapshot_id=old_snapshot_id,
+    )
+
+    assert [paper.id for paper in refreshed["papers"]] == ["x1", "x2"]
+    assert refreshed["snapshot_id"]
+    assert refreshed["snapshot_id"] != old_snapshot_id
+    assert mock_fetch_all_source_candidates.await_count == 2

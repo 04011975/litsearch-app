@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass 
+from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ExportRequestParams:
@@ -20,6 +20,7 @@ class ExportRequestParams:
     mesh: str = ""
     mesh_mode: str = "or"
     token: str | None = None
+    snapshot_id: str | None = None
 
 def build_export_request_params(
     *,
@@ -37,6 +38,7 @@ def build_export_request_params(
     n = max(1, min(int(safe_int(query_params.get("n"), 10) or 10), max_page_size))
     page = max(1, int(safe_int(query_params.get("page"), 1) or 1))
     token = (query_params.get("token") or "").strip() or None
+    snapshot_id = (query_params.get("snapshot_id") or "").strip() or None
 
     sort = normalize_sort(query_params.get("sort") or "relevance")
     mesh = normalize_mesh(query_params.get("mesh", "") or "")
@@ -63,6 +65,7 @@ def build_export_request_params(
         mesh=mesh,
         mesh_mode=mesh_mode,
         token=token,
+        snapshot_id=snapshot_id,
     )
 
 def validate_export_request_params(
