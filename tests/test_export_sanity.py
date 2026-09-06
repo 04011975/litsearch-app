@@ -1,5 +1,6 @@
 import io
 import zipfile
+import pytest
 
 from app.models.paper import Paper
 
@@ -52,6 +53,7 @@ def test_export_pubmed_ris_page(client):
     assert "ER  -" in text
 
 
+@pytest.mark.integration
 def test_export_openalex_csv_page(client):
     r = client.get(
         "/export/csv",
