@@ -102,6 +102,30 @@ def strict_metadata_dedup_key(paper: Paper) -> str | None:
     return None
 
 
+def tolerant_metadata_base_key(paper: Paper) -> str | None:
+    title = normalize_text(getattr(paper, "title", None))
+    author = first_author_key(paper)
+
+    if title and author:
+        return f"title_author:{title}|{author}"
+
+    return None
+
+
+def numeric_paper_year(paper: Paper) -> int | None:
+    value = paper_year(paper)
+
+    if value is None:
+        return None
+
+    match = re.search(r"\b(19|20)\d{2}\b", str(value))
+
+    if not match:
+        return None
+
+    return int(match.group(0))
+
+
 def identifiers_conflict(a: Paper, b: Paper) -> bool:
     a_doi = normalize_doi(getattr(a, "doi", None))
     b_doi = normalize_doi(getattr(b, "doi", None))
@@ -208,11 +232,13 @@ def deduplicate_papers(papers: Iterable[Paper]) -> tuple[list[Paper], int]:
     unique_by_key: OrderedDict[str, Paper] = OrderedDict()
     key_index: dict[str, str] = {}
     metadata_index: dict[str, str] = {}
+    tolerant_metadata_index: dict[str, list[str]] = {}
     duplicates_removed = 0
 
     for paper in papers:
         key = dedup_key(paper)
         metadata_key = strict_metadata_dedup_key(paper)
+        tolerant_key = tolerant_metadata_base_key(paper)
 
         matched_key = key_index.get(key)
 
@@ -225,6 +251,31 @@ def deduplicate_papers(papers: Iterable[Paper]) -> tuple[list[Paper], int]:
                 if not identifiers_conflict(candidate, paper):
                     matched_key = candidate_key
 
+        if matched_key is None and tolerant_key:
+            paper_year_value = numeric_paper_year(paper)
+            paper_doi = normalize_doi(getattr(paper, "doi", None))
+
+            if paper_year_value is not None:
+                for candidate_key in tolerant_metadata_index.get(tolerant_key, []):
+                    candidate = unique_by_key[candidate_key]
+                    candidate_year_value = numeric_paper_year(candidate)
+                    candidate_doi = normalize_doi(getattr(candidate, "doi", None))
+
+                    if candidate_year_value is None:
+                        continue
+
+                    if abs(candidate_year_value - paper_year_value) > 1:
+                        continue
+
+                    if bool(candidate_doi) == bool(paper_doi):
+                        continue
+
+                    if identifiers_conflict(candidate, paper):
+                        continue
+
+                    matched_key = candidate_key
+                    break
+
         if matched_key is not None:
             merged = merge_papers(unique_by_key[matched_key], paper)
             unique_by_key[matched_key] = merged
@@ -236,11 +287,21 @@ def deduplicate_papers(papers: Iterable[Paper]) -> tuple[list[Paper], int]:
             merged_metadata_key = strict_metadata_dedup_key(merged)
             if merged_metadata_key:
                 metadata_index[merged_metadata_key] = matched_key
+
+            merged_tolerant_key = tolerant_metadata_base_key(merged)
+            if merged_tolerant_key:
+                tolerant_metadata_index.setdefault(merged_tolerant_key, [])
+
+                if matched_key not in tolerant_metadata_index[merged_tolerant_key]:
+                    tolerant_metadata_index[merged_tolerant_key].append(matched_key)
         else:
             unique_by_key[key] = paper
             key_index[key] = key
 
             if metadata_key:
                 metadata_index[metadata_key] = key
+
+            if tolerant_key:
+                tolerant_metadata_index.setdefault(tolerant_key, []).append(key)
 
     return list(unique_by_key.values()), duplicates_removed

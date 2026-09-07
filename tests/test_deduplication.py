@@ -236,3 +236,160 @@ def test_merge_preserves_missing_fields():
     assert len(result) == 1
     assert removed == 1
     assert result[0].journal == "Better Journal"
+
+
+def test_deduplicate_doi_record_with_matching_metadata_one_year_apart():
+    papers = [
+        make_paper(
+            id="1",
+            source="openalex",
+            title="Applications of Machine Learning in Cancer Prediction and Prognosis",
+            authors=["Joseph A. Cruz", "David S. Wishart"],
+            year=2006,
+            doi="10.1177/117693510600200030",
+        ),
+        make_paper(
+            id="2",
+            source="openalex",
+            title="Applications of machine learning in cancer prediction and prognosis.",
+            authors=["Joseph A. Cruz", "David S. Wishart"],
+            year=2007,
+            doi=None,
+        ),
+    ]
+
+    result, removed = deduplicate_papers(papers)
+
+    assert len(result) == 1
+    assert removed == 1
+
+
+def test_same_metadata_two_years_apart_remain_separate():
+    papers = [
+        make_paper(
+            id="1",
+            source="openalex",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2020,
+            doi="10.1000/first",
+        ),
+        make_paper(
+            id="2",
+            source="semantic_scholar",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2022,
+            doi=None,
+        ),
+    ]
+
+    result, removed = deduplicate_papers(papers)
+
+    assert len(result) == 2
+    assert removed == 0
+
+
+def test_doi_less_records_one_year_apart_remain_separate():
+    papers = [
+        make_paper(
+            id="1",
+            source="openalex",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2020,
+            doi=None,
+        ),
+        make_paper(
+            id="2",
+            source="semantic_scholar",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2021,
+            doi=None,
+        ),
+    ]
+
+    result, removed = deduplicate_papers(papers)
+
+    assert len(result) == 2
+    assert removed == 0
+
+
+def test_different_dois_one_year_apart_remain_separate():
+    papers = [
+        make_paper(
+            id="1",
+            source="openalex",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2020,
+            doi="10.1000/first",
+        ),
+        make_paper(
+            id="2",
+            source="crossref",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2021,
+            doi="10.1000/second",
+        ),
+    ]
+
+    result, removed = deduplicate_papers(papers)
+
+    assert len(result) == 2
+    assert removed == 0
+
+
+def test_deduplicate_doi_less_record_with_matching_metadata_one_year_apart_reverse_order():
+    papers = [
+        make_paper(
+            id="1",
+            source="openalex",
+            title="Applications of machine learning in cancer prediction and prognosis.",
+            authors=["Joseph A. Cruz", "David S. Wishart"],
+            year=2007,
+            doi=None,
+        ),
+        make_paper(
+            id="2",
+            source="openalex",
+            title="Applications of Machine Learning in Cancer Prediction and Prognosis",
+            authors=["Joseph A. Cruz", "David S. Wishart"],
+            year=2006,
+            doi="10.1177/117693510600200030",
+        ),
+    ]
+
+    result, removed = deduplicate_papers(papers)
+
+    assert len(result) == 1
+    assert removed == 1
+    assert result[0].doi == "10.1177/117693510600200030"
+
+
+def test_year_tolerance_handles_non_numeric_year_without_crashing():
+    papers = [
+        make_paper(
+            id="1",
+            source="openalex",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year=2020,
+            doi="10.1000/test",
+        ),
+        make_paper(
+            id="2",
+            source="semantic_scholar",
+            title="Cancer Biology",
+            authors=["Smith J"],
+            year="2021 Apr",
+            doi=None,
+        ),
+    ]
+
+    result, removed = deduplicate_papers(papers)
+
+    assert len(result) == 1
+    assert removed == 1
