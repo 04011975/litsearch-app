@@ -63,13 +63,69 @@ def paper_year(paper: Paper) -> str | None:
     if year:
         return str(year)
 
-    date = getattr(paper, "publication_date", None) or getattr(paper, "published_date", None)
+    date = getattr(paper, "publication_date", None) or getattr(
+        paper, "published_date", None
+    )
     if date:
         match = re.search(r"\b(19|20)\d{2}\b", str(date))
         if match:
             return match.group(0)
 
     return None
+
+
+def metadata_dedup_key(paper: Paper) -> str | None:
+    title = normalize_text(getattr(paper, "title", None))
+    year = paper_year(paper)
+    author = first_author_key(paper)
+
+    if title and year and author:
+        return f"title_author_year:{title}|{author}|{year}"
+
+    if title and year:
+        return f"title_year:{title}|{year}"
+
+    if title:
+        return f"title:{title}"
+
+    return None
+
+
+def strict_metadata_dedup_key(paper: Paper) -> str | None:
+    title = normalize_text(getattr(paper, "title", None))
+    year = paper_year(paper)
+    author = first_author_key(paper)
+
+    if title and year and author:
+        return f"title_author_year:{title}|{author}|{year}"
+
+    return None
+
+
+def identifiers_conflict(a: Paper, b: Paper) -> bool:
+    a_doi = normalize_doi(getattr(a, "doi", None))
+    b_doi = normalize_doi(getattr(b, "doi", None))
+
+    if a_doi and b_doi and a_doi != b_doi:
+        return True
+
+    a_pmid = getattr(a, "pmid", None)
+    b_pmid = getattr(b, "pmid", None)
+
+    if a_pmid and b_pmid and str(a_pmid).strip() != str(b_pmid).strip():
+        return True
+
+    a_pmcid = getattr(a, "pmcid", None)
+    b_pmcid = getattr(b, "pmcid", None)
+
+    if (
+        a_pmcid
+        and b_pmcid
+        and str(a_pmcid).strip().lower() != str(b_pmcid).strip().lower()
+    ):
+        return True
+
+    return False
 
 
 def dedup_key(paper: Paper) -> str:
@@ -85,18 +141,9 @@ def dedup_key(paper: Paper) -> str:
     if pmcid:
         return f"pmcid:{str(pmcid).strip().lower()}"
 
-    title = normalize_text(getattr(paper, "title", None))
-    year = paper_year(paper)
-    author = first_author_key(paper)
-
-    if title and year and author:
-        return f"title_author_year:{title}|{author}|{year}"
-
-    if title and year:
-        return f"title_year:{title}|{year}"
-
-    if title:
-        return f"title:{title}"
+    metadata_key = metadata_dedup_key(paper)
+    if metadata_key:
+        return metadata_key
 
     source = getattr(paper, "source", "unknown")
     paper_id = getattr(paper, "id", None) or getattr(paper, "external_id", None)
@@ -159,15 +206,41 @@ def merge_papers(primary: Paper, secondary: Paper) -> Paper:
 
 def deduplicate_papers(papers: Iterable[Paper]) -> tuple[list[Paper], int]:
     unique_by_key: OrderedDict[str, Paper] = OrderedDict()
+    key_index: dict[str, str] = {}
+    metadata_index: dict[str, str] = {}
     duplicates_removed = 0
 
     for paper in papers:
         key = dedup_key(paper)
+        metadata_key = strict_metadata_dedup_key(paper)
 
-        if key in unique_by_key:
-            unique_by_key[key] = merge_papers(unique_by_key[key], paper)
+        matched_key = key_index.get(key)
+
+        if matched_key is None and metadata_key:
+            candidate_key = metadata_index.get(metadata_key)
+
+            if candidate_key is not None:
+                candidate = unique_by_key[candidate_key]
+
+                if not identifiers_conflict(candidate, paper):
+                    matched_key = candidate_key
+
+        if matched_key is not None:
+            merged = merge_papers(unique_by_key[matched_key], paper)
+            unique_by_key[matched_key] = merged
             duplicates_removed += 1
+
+            key_index[key] = matched_key
+            key_index[dedup_key(merged)] = matched_key
+
+            merged_metadata_key = strict_metadata_dedup_key(merged)
+            if merged_metadata_key:
+                metadata_index[merged_metadata_key] = matched_key
         else:
             unique_by_key[key] = paper
+            key_index[key] = key
+
+            if metadata_key:
+                metadata_index[metadata_key] = key
 
     return list(unique_by_key.values()), duplicates_removed
