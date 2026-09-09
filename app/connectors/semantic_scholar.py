@@ -10,6 +10,8 @@ import requests
 
 from app.models.paper import Paper
 
+from app.redis_client import make_sync_redis
+
 logger = logging.getLogger("litsearch.semantic_scholar")
 
 BASE_URL = "https://api.semanticscholar.org/graph/v1"
@@ -53,6 +55,30 @@ DETAIL_FIELDS = BULK_SEARCH_FIELDS
 
 _session = requests.Session()
 _last_request_time = 0.0
+_redis = make_sync_redis()
+
+SEMANTIC_SCHOLAR_RATE_LIMIT_KEY = "rate_limit:semantic_scholar:global"
+SEMANTIC_SCHOLAR_MIN_INTERVAL_MS = 1100
+
+
+def _acquire_distributed_rate_limit(redis_client) -> None:
+    while True:
+        try:
+            acquired = redis_client.set(
+                SEMANTIC_SCHOLAR_RATE_LIMIT_KEY,
+                "1",
+                nx=True,
+                px=SEMANTIC_SCHOLAR_MIN_INTERVAL_MS,
+            )
+        except Exception:
+            return
+
+        if acquired:
+            return
+
+        time.sleep(SEMANTIC_SCHOLAR_MIN_INTERVAL_MS / 1000)
+
+
 class SemanticScholarError(Exception):
     """Raised when Semantic Scholar returns an error or malformed response."""
 
@@ -83,6 +109,8 @@ def _request(url: str, params: dict[str, Any]) -> dict[str, Any]:
             if elapsed < 1.1:
                 time.sleep(1.1 - elapsed)
 
+            _acquire_distributed_rate_limit(_redis)
+
             logger.info("Semantic Scholar API request params=%r", params)
 
             response = _session.get(
@@ -99,28 +127,30 @@ def _request(url: str, params: dict[str, Any]) -> dict[str, Any]:
         except requests.exceptions.Timeout as exc:
             last_exc = SemanticScholarError("Semantic Scholar request timed out")
             if attempt < 2:
-                time.sleep((2 ** attempt) + random.uniform(0, 0.25))
+                time.sleep((2**attempt) + random.uniform(0, 0.25))
                 continue
             raise last_exc from exc
 
         except requests.exceptions.RequestException as exc:
-            raise SemanticScholarError(f"Semantic Scholar request failed: {exc}") from exc
+            raise SemanticScholarError(
+                f"Semantic Scholar request failed: {exc}"
+            ) from exc
 
         if response.status_code == 429:
             logger.warning("Semantic Scholar API rate limit hit params=%r", params)
             if attempt < 2:
                 retry_after = response.headers.get("Retry-After")
                 try:
-                    wait_s = float(retry_after) if retry_after else (2 ** attempt)
+                    wait_s = float(retry_after) if retry_after else (2**attempt)
                 except ValueError:
-                    wait_s = 2 ** attempt
+                    wait_s = 2**attempt
                 time.sleep(wait_s + random.uniform(0, 0.25))
                 continue
             raise SemanticScholarError("Semantic Scholar rate limit reached (HTTP 429)")
 
         if response.status_code >= 500:
             if attempt < 2:
-                time.sleep((2 ** attempt) + random.uniform(0, 0.25))
+                time.sleep((2**attempt) + random.uniform(0, 0.25))
                 continue
             body = response.text[:500]
             raise SemanticScholarError(
@@ -136,7 +166,9 @@ def _request(url: str, params: dict[str, Any]) -> dict[str, Any]:
         try:
             data = response.json()
         except ValueError as exc:
-            raise SemanticScholarError("Semantic Scholar returned invalid JSON") from exc
+            raise SemanticScholarError(
+                "Semantic Scholar returned invalid JSON"
+            ) from exc
 
         if not isinstance(data, dict):
             raise SemanticScholarError("Unexpected Semantic Scholar response format")
@@ -224,9 +256,8 @@ def _to_paper(record: dict[str, Any]) -> Paper:
         publication_date=publication_date,
         abstract=abstract,
         doi=_extract_doi(record),
-        url=record.get("url") or (
-            f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else None
-        ),
+        url=record.get("url")
+        or (f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else None),
         pmcid=_extract_pmcid(record),
         mesh_terms=[],
         has_full_text=_has_full_text(record),
@@ -292,7 +323,9 @@ def search_semantic_scholar(
 
     raw_items = data.get("data") or []
     if not isinstance(raw_items, list):
-        raise SemanticScholarError("Semantic Scholar search returned malformed data list")
+        raise SemanticScholarError(
+            "Semantic Scholar search returned malformed data list"
+        )
 
     try:
         total = int(data.get("total", 0) or 0)
@@ -317,6 +350,7 @@ def search_semantic_scholar(
             papers.append(paper)
 
     return papers, total
+
 
 def search_semantic_scholar_bulk(
     q: str,
@@ -370,7 +404,9 @@ def search_semantic_scholar_bulk(
 
     raw_items = data.get("data") or []
     if not isinstance(raw_items, list):
-        raise SemanticScholarError("Semantic Scholar bulk search returned malformed data list")
+        raise SemanticScholarError(
+            "Semantic Scholar bulk search returned malformed data list"
+        )
 
     next_token = data.get("token")
     if next_token is not None:
@@ -378,7 +414,9 @@ def search_semantic_scholar_bulk(
 
     estimated_total_raw = data.get("total")
     try:
-        estimated_total = int(estimated_total_raw) if estimated_total_raw is not None else None
+        estimated_total = (
+            int(estimated_total_raw) if estimated_total_raw is not None else None
+        )
     except (TypeError, ValueError):
         estimated_total = None
 
@@ -400,6 +438,7 @@ def search_semantic_scholar_bulk(
 
     papers = papers[:n]
     return papers, estimated_total, next_token
+
 
 def fetch_semantic_scholar_detail(paper_id: str) -> Paper | None:
     """
