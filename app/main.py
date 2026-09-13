@@ -1331,6 +1331,12 @@ async def search(
             "snapshot_id": snapshot_id,
         }
 
+        previous_url = (
+            _build_url("/search", {**base_params, "page": page_i - 1})
+            if page_i > 1
+            else None
+        )
+
         next_url = (
             _build_url("/search", {**base_params, "page": page_i + 1})
             if page_i < total_pages
@@ -1365,6 +1371,7 @@ async def search(
                 "total_pages": total_pages,
                 "error": None,
                 "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
+                "previous_url": previous_url,
                 "next_url": next_url,
                 "last_url": last_url,
                 "snapshot_id": snapshot_id,
