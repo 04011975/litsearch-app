@@ -355,3 +355,68 @@ def test_all_sources_previous_navigation_preserves_snapshot_id(
 
     assert "page=1" in previous_link
     assert "snapshot_id=snapshot-test-123" in previous_link
+
+
+def test_all_sources_goto_page_preserves_snapshot_id(
+    client,
+    monkeypatch,
+):
+    async def fake_build_all_source_results(**kwargs):
+        return {
+            "papers": [
+                Paper(
+                    id="p1",
+                    source="pubmed",
+                    title="Paper 1",
+                    year=2025,
+                    doi="10.1234/p1",
+                )
+            ],
+            "all_papers": [
+                Paper(
+                    id="p1",
+                    source="pubmed",
+                    title="Paper 1",
+                    year=2025,
+                    doi="10.1234/p1",
+                ),
+                Paper(
+                    id="p2",
+                    source="openalex",
+                    title="Paper 2",
+                    year=2025,
+                    doi="10.1234/p2",
+                ),
+            ],
+            "total_count": 2,
+            "duplicates_removed": 0,
+            "source_counts": {
+                "pubmed": 1,
+                "openalex": 1,
+            },
+            "failed_sources": [],
+            "snapshot_id": "snapshot-test-123",
+        }
+
+    monkeypatch.setattr(
+        "app.main.build_all_source_results",
+        fake_build_all_source_results,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "all",
+            "page": 1,
+            "n": 1,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+
+    goto_form = r.text.split('<form id="goto_form"', 1)[1].split("</form>", 1)[0]
+
+    assert 'name="snapshot_id"' in goto_form
+    assert 'value="snapshot-test-123"' in goto_form

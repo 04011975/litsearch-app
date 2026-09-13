@@ -370,6 +370,10 @@
     <input type="hidden" name="n" value="{{ n }}">
     <input type="hidden" name="sort" value="{{ sort }}">
 
+    {% if current_source == "all" and snapshot_id %}
+      <input type="hidden" name="snapshot_id" value="{{ snapshot_id }}">
+    {% endif %}
+
     {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
       <input type="hidden" name="year_min" value="">
       <input type="hidden" name="year_max" value="">
