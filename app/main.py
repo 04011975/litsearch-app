@@ -253,7 +253,7 @@ async def lifespan(app: FastAPI):
         try:
             r = getattr(app.state, "redis", None)
             if r is not None:
-                await r.close()
+                await r.aclose()
                 try:
                     await r.connection_pool.disconnect(inuse_connections=True)
                 except TypeError:
