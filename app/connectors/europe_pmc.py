@@ -18,7 +18,9 @@ DEFAULT_TIMEOUT_SECONDS = 20.0
 
 TOOL_NAME = os.getenv("TOOL_NAME", "LitSearch")
 CONTACT_EMAIL = (os.getenv("CONTACT_EMAIL") or "").strip()
-USER_AGENT = f"{TOOL_NAME}/0.1" + (f" (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else "")
+USER_AGENT = f"{TOOL_NAME}/0.1" + (
+    f" (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else ""
+)
 _session = requests.Session()
 
 DEFAULT_RESULT_TYPE = "core"
@@ -27,6 +29,7 @@ MAX_PAGE_SIZE = 1000
 
 class EuropePmcTemporaryError(Exception):
     """Tijdelijke fout vanuit Europe PMC, zoals timeout of 5xx."""
+
     pass
 
 
@@ -41,6 +44,19 @@ def _parse_authors(author_string: str) -> list[str]:
     if not s:
         return []
     return [p.strip() for p in s.split(",") if p.strip()]
+
+
+def _normalize_abstract_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    text = re.sub(r"\\?<sub>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\?</sub>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\?<sup>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\\?</sup>", "", text, flags=re.IGNORECASE)
+
+    return text
 
 
 def _normalize_mesh(mesh: str) -> str:
@@ -144,7 +160,7 @@ def _map_result_json_to_paper(item: dict) -> Paper:
     journal = str(item.get("journalTitle") or "").strip()
     pub_year = item.get("pubYear")
     doi = str(item.get("doi") or "").strip()
-    abstract = str(item.get("abstractText") or "").strip()
+    abstract = _normalize_abstract_text(item.get("abstractText"))
 
     is_open_access = str(item.get("isOpenAccess") or "").strip()
     ft_url = _first_fulltext_url_json(item)
@@ -261,7 +277,11 @@ def europe_pmc_search(
             if not isinstance(results, list):
                 results = []
 
-            papers = [_map_result_json_to_paper(item) for item in results if isinstance(item, dict)]
+            papers = [
+                _map_result_json_to_paper(item)
+                for item in results
+                if isinstance(item, dict)
+            ]
 
             logger.info(
                 "epmc_search_ok q=%r sort_in=%r sort_mapped=%r page=%s cursor_in=%r total=%s returned=%s next_cursor=%r",
