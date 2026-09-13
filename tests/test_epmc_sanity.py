@@ -1,5 +1,7 @@
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from app.connectors.europe_pmc import europe_pmc_fetch_detail, europe_pmc_search
 
 
