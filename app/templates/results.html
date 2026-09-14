@@ -318,7 +318,7 @@
     {% else %}
       <span class="muted">Previous</span>
     {% endif %}
-  {% elif current_source in ["all", "doaj", "openalex", "crossref", "pubmed"] %}
+  {% elif current_source in ["all", "doaj", "openalex", "crossref", "pubmed", "semantic_scholar"] %}
     {% if previous_url %}
       <a href="{{ previous_url }}">Previous</a>
     {% else %}
