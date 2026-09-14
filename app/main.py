@@ -1688,6 +1688,42 @@ async def search(
         )
         total_pages = min(total_pages_raw, EUROPE_PMC_MAX_PAGES)
 
+        epmc_previous_url = None
+        if page_i > 1:
+            previous_page = page_i - 1
+            previous_chunk = _epmc_target_chunk(previous_page, n)
+
+            if previous_chunk == target_chunk:
+                previous_cursor = start_cursor
+            else:
+                previous_cursor = _epmc_get_cursor_for_chunk(
+                    q,
+                    n=n,
+                    sort=ui_sort,
+                    chunk=previous_chunk,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=has_abs_i,
+                    mesh=mesh,
+                )
+
+            if previous_cursor:
+                epmc_previous_url = _build_url(
+                    "/search",
+                    {
+                        "q": q,
+                        "source": "europe_pmc",
+                        "n": n,
+                        "sort": ui_sort,
+                        "page": previous_page,
+                        "cursor": previous_cursor,
+                        "year_min": year_min,
+                        "year_max": year_max,
+                        "has_abstract": has_abstract,
+                        "mesh": mesh,
+                    },
+                )
+
         epmc_next_url = None
         if page_i < total_pages:
             next_page = page_i + 1
@@ -1803,6 +1839,7 @@ async def search(
                 "warning": warning,
                 "allow_deep_paging": deep_paging_possible,
                 "epmc_building": False,
+                "epmc_previous_url": epmc_previous_url,
                 "epmc_next_url": epmc_next_url,
                 "epmc_last_url": epmc_last_url,
                 "epmc_export_url_csv": epmc_export_url_csv,

@@ -96,6 +96,102 @@ def test_epmc_search_shows_source(client):
     assert "Europe PMC" in r.text
 
 
+def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatch):
+    async def fake_europe_pmc_search(*args, **kwargs):
+        papers = [
+            Paper(
+                id=f"epmc-{i}",
+                source="europe_pmc",
+                title=f"Europe PMC paper {i}",
+                authors=["Tester A"],
+                journal="Test Journal",
+                year=2024,
+                abstract="Test abstract",
+                doi=None,
+                pmcid=None,
+                url=f"https://europepmc.org/article/MED/{i}",
+                mesh_terms=[],
+                has_full_text=False,
+            )
+            for i in range(100)
+        ]
+        return papers, 200, "next-cursor"
+
+    monkeypatch.setattr(
+        "app.main._europe_pmc_search_compat_async",
+        fake_europe_pmc_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "europe_pmc",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+            "cursor": "*",
+        },
+    )
+
+    assert r.status_code == 200
+    assert ">Previous</a>" in r.text
+    assert "page=1" in r.text
+
+
+def test_europe_pmc_previous_navigation_uses_previous_chunk_cursor(client, monkeypatch):
+    async def fake_europe_pmc_search(*args, **kwargs):
+        papers = [
+            Paper(
+                id=f"epmc-{i}",
+                source="europe_pmc",
+                title=f"Europe PMC paper {i}",
+                authors=["Tester A"],
+                journal="Test Journal",
+                year=2024,
+                abstract="Test abstract",
+                doi=None,
+                pmcid=None,
+                url=f"https://europepmc.org/article/MED/{i}",
+                mesh_terms=[],
+                has_full_text=False,
+            )
+            for i in range(100)
+        ]
+        return papers, 1000, "next-cursor"
+
+    def fake_get_cursor_for_chunk(*args, **kwargs):
+        if kwargs.get("chunk") == 1:
+            return "previous-chunk-cursor"
+        return None
+
+    monkeypatch.setattr(
+        "app.main._europe_pmc_search_compat_async",
+        fake_europe_pmc_search,
+    )
+    monkeypatch.setattr(
+        "app.main._epmc_get_cursor_for_chunk",
+        fake_get_cursor_for_chunk,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "europe_pmc",
+            "page": 101,
+            "n": 5,
+            "sort": "relevance",
+            "cursor": "current-chunk-cursor",
+        },
+    )
+
+    assert r.status_code == 200
+    assert ">Previous</a>" in r.text
+    assert "page=100" in r.text
+    assert "cursor=previous-chunk-cursor" in r.text
+
+
 def test_openalex_search_shows_source(client):
     r = client.get(
         "/search",
