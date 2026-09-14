@@ -1922,11 +1922,13 @@ async def search(
                 "year_max": year_max_i,
             },
         )
+
+        first_page_papers = None
         cached_meta = await cache_get_json(redis, ck_meta)
         if cached_meta and "total_count" in cached_meta:
             total_count = int(cached_meta.get("total_count") or 0)
         else:
-            _p1, total_count = await _run_sync(
+            first_page_papers, total_count = await _run_sync(
                 openalex_search,
                 q,
                 page=1,
@@ -1980,7 +1982,6 @@ async def search(
             },
         )
         cached_page = await cache_get_json(redis, ck_page)
-        cached_page = None
 
         logger.info(
             "OPENALEX cache page_hit=%s meta_hit=%s",
@@ -1992,6 +1993,14 @@ async def search(
             oa_papers = [
                 Paper.from_dict(d) for d in cached_page["papers"] if isinstance(d, dict)
             ]
+        elif page_i == 1 and first_page_papers is not None:
+            oa_papers = first_page_papers
+            await cache_set_json(
+                redis,
+                ck_page,
+                {"papers": [p.to_dict() for p in (oa_papers or [])]},
+                OPENALEX_CACHE_TTL_S,
+            )
         else:
             oa_papers, _ = await _run_sync(
                 openalex_search,
