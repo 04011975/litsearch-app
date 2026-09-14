@@ -1,5 +1,8 @@
 from app.models.paper import Paper
 
+import html
+import re
+
 
 def test_search_page_loads(client):
     r = client.get("/search")
@@ -190,6 +193,151 @@ def test_europe_pmc_previous_navigation_uses_previous_chunk_cursor(client, monke
     assert ">Previous</a>" in r.text
     assert "page=100" in r.text
     assert "cursor=previous-chunk-cursor" in r.text
+
+
+def test_semantic_scholar_relevance_previous_navigation(client, monkeypatch):
+    def fake_semantic_scholar_search(*args, **kwargs):
+        papers = [
+            Paper(
+                id=f"ss-{i}",
+                source="semantic_scholar",
+                title=f"Semantic Scholar paper {i}",
+                authors=["Tester A"],
+                journal="Test Journal",
+                year=2024,
+                abstract="Test abstract",
+                doi=None,
+                pmcid=None,
+                url=f"https://www.semanticscholar.org/paper/{i}",
+                mesh_terms=[],
+                has_full_text=False,
+            )
+            for i in range(5)
+        ]
+        return papers, 50
+
+    monkeypatch.setattr(
+        "app.main.search_semantic_scholar",
+        fake_semantic_scholar_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "semantic_scholar",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert ">Previous</a>" in r.text
+    assert "page=1" in r.text
+
+
+def test_semantic_scholar_bulk_previous_navigation_uses_cached_token(
+    client, monkeypatch
+):
+    def fake_semantic_scholar_bulk(*args, **kwargs):
+        papers = [
+            Paper(
+                id=f"ss-bulk-{i}",
+                source="semantic_scholar",
+                title=f"Semantic Scholar bulk paper {i}",
+                authors=["Tester A"],
+                journal="Test Journal",
+                year=2024,
+                abstract="Test abstract",
+                doi=None,
+                pmcid=None,
+                url=f"https://www.semanticscholar.org/paper/bulk-{i}",
+                mesh_terms=[],
+                has_full_text=False,
+            )
+            for i in range(5)
+        ]
+        return papers, 50, "next-page-token"
+
+    monkeypatch.setattr(
+        "app.main.search_semantic_scholar_bulk",
+        fake_semantic_scholar_bulk,
+    )
+
+    monkeypatch.setattr(
+        "app.main._ss_get_token_for_page",
+        lambda *args, **kwargs: "previous-page-token",
+        raising=False,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "semantic_scholar",
+            "page": 3,
+            "n": 5,
+            "sort": "date_desc",
+            "token": "current-page-token",
+        },
+    )
+
+    assert r.status_code == 200
+    assert ">Previous</a>" in r.text
+    assert "page=2" in r.text
+    assert "token=previous-page-token" in r.text
+
+
+def test_semantic_scholar_bulk_page_two_previous_goes_to_first_page_without_token(
+    client, monkeypatch
+):
+    def fake_semantic_scholar_bulk(*args, **kwargs):
+        papers = [
+            Paper(
+                id=f"ss-bulk-{i}",
+                source="semantic_scholar",
+                title=f"Semantic Scholar bulk paper {i}",
+                authors=["Tester A"],
+                journal="Test Journal",
+                year=2024,
+                abstract="Test abstract",
+                doi=None,
+                pmcid=None,
+                url=f"https://www.semanticscholar.org/paper/bulk-{i}",
+                mesh_terms=[],
+                has_full_text=False,
+            )
+            for i in range(5)
+        ]
+        return papers, 50, "next-page-token"
+
+    monkeypatch.setattr(
+        "app.main.search_semantic_scholar_bulk",
+        fake_semantic_scholar_bulk,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "semantic_scholar",
+            "page": 2,
+            "n": 5,
+            "sort": "date_desc",
+            "token": "current-page-token",
+        },
+    )
+
+    assert r.status_code == 200
+
+    match = re.search(r'href="([^"]+)">Previous</a>', r.text)
+    assert match is not None
+
+    previous_href = html.unescape(match.group(1))
+
+    assert "page=1" in previous_href
+    assert "token=" not in previous_href
 
 
 def test_openalex_search_shows_source(client):

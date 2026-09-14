@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 
 import math
@@ -976,6 +977,92 @@ def _epmc_set_cursor_for_chunk(
         pipe.hset(key, str(int(chunk)), cursor)
         pipe.hsetnx(key, "chunk_size", str(int(EPMC_CHUNK_SIZE)))
         pipe.expire(key, EUROPE_PMC_CURSOR_TTL_SECONDS)
+        pipe.execute()
+    except Exception:
+        return
+
+
+# =========================================================
+# Semantic Scholar bulk token cache
+# =========================================================
+
+
+def _ss_cache_key(
+    q: str,
+    *,
+    n: int,
+    sort: str,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    has_abstract: int = 0,
+) -> str:
+    payload = "\x1f".join(
+        [
+            (q or "").strip(),
+            str(int(n)),
+            (sort or "").strip(),
+            "" if year_min is None else str(int(year_min)),
+            "" if year_max is None else str(int(year_max)),
+            "1" if int(has_abstract or 0) else "0",
+        ]
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"semantic_scholar:tokens:{digest}"
+
+
+def _ss_get_token_for_page(
+    q: str,
+    *,
+    n: int,
+    sort: str,
+    page: int,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    has_abstract: int = 0,
+) -> Optional[str]:
+    if not _redis:
+        return None
+
+    try:
+        key = _ss_cache_key(
+            q,
+            n=n,
+            sort=sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+        )
+        return _redis.hget(key, str(int(page)))
+    except Exception:
+        return None
+
+
+def _ss_set_token_for_page(
+    q: str,
+    *,
+    n: int,
+    sort: str,
+    page: int,
+    token: str,
+    year_min: int | None = None,
+    year_max: int | None = None,
+    has_abstract: int = 0,
+) -> None:
+    if not _redis or not token:
+        return
+
+    try:
+        key = _ss_cache_key(
+            q,
+            n=n,
+            sort=sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+        )
+        pipe = _redis.pipeline()
+        pipe.hset(key, str(int(page)), token)
+        pipe.expire(key, SEMANTIC_SCHOLAR_CACHE_TTL_S)
         pipe.execute()
     except Exception:
         return
@@ -2411,6 +2498,18 @@ async def search(
 
                 token = (request.query_params.get("token") or "").strip() or None
 
+                if token and page_i > 1:
+                    _ss_set_token_for_page(
+                        q,
+                        n=n,
+                        sort=ss_api_sort,
+                        page=page_i,
+                        token=token,
+                        year_min=ss_year_min_i,
+                        year_max=ss_year_max_i,
+                        has_abstract=int(has_abstract_flag),
+                    )
+
                 ss_papers, total_count, next_token = await _run_sync(
                     search_semantic_scholar_bulk,
                     q,
@@ -2421,6 +2520,19 @@ async def search(
                     year_max=ss_year_max_i,
                     has_abstract=has_abstract_flag,
                 )
+
+                if next_token:
+                    _ss_set_token_for_page(
+                        q,
+                        n=n,
+                        sort=ss_api_sort,
+                        page=page_i + 1,
+                        token=next_token,
+                        year_min=ss_year_min_i,
+                        year_max=ss_year_max_i,
+                        has_abstract=int(has_abstract_flag),
+                    )
+
             else:
                 ss_papers, total_count = await _run_sync(
                     search_semantic_scholar,
@@ -2469,6 +2581,54 @@ async def search(
         ]
 
         total_pages = max(1, math.ceil(int(total_count or 0) / int(n)))
+
+        previous_url = None
+        if ss_mode == "relevance" and page_i > 1:
+            previous_url = _build_url(
+                "/search",
+                {
+                    "q": q,
+                    "source": "semantic_scholar",
+                    "n": n,
+                    "page": page_i - 1,
+                    "sort": ui_sort,
+                    "year_min": year_min,
+                    "year_max": year_max,
+                    "has_abstract": has_abstract,
+                },
+            )
+
+        elif ss_mode == "bulk" and page_i > 1:
+            previous_page = page_i - 1
+
+            if previous_page == 1:
+                previous_token = None
+            else:
+                previous_token = _ss_get_token_for_page(
+                    q,
+                    n=n,
+                    sort=ss_api_sort,
+                    page=previous_page,
+                    year_min=ss_year_min_i,
+                    year_max=ss_year_max_i,
+                    has_abstract=int(has_abstract_flag),
+                )
+
+            if previous_page == 1 or previous_token:
+                previous_url = _build_url(
+                    "/search",
+                    {
+                        "q": q,
+                        "source": "semantic_scholar",
+                        "n": n,
+                        "page": previous_page,
+                        "sort": ui_sort,
+                        "token": previous_token,
+                        "year_min": year_min,
+                        "year_max": year_max,
+                        "has_abstract": has_abstract,
+                    },
+                )
 
         if ss_mode == "bulk":
             next_url = (
@@ -2552,6 +2712,7 @@ async def search(
                     if ss_mode == "relevance"
                     else None
                 ),
+                "previous_url": previous_url,
                 "next_url": next_url,
                 "last_url": last_url,
             }
