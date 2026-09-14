@@ -310,8 +310,9 @@
 {% if not ss_failed %}
 <div style="display:flex; gap: 0.75rem; align-items:center; margin-bottom: 0.75rem; flex-wrap:wrap;">
 
-  {# PREVIOUS — All Sources uses the same Redis snapshot when navigating back #}
-  {% if current_source == "all" %}
+  {# PREVIOUS — supported for All Sources and page-based connectors #}
+
+  {% if current_source in ["all", "doaj", "openalex", "crossref", "pubmed"] %}
     {% if previous_url %}
       <a href="{{ previous_url }}">Previous</a>
     {% else %}

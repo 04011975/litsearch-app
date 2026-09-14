@@ -2032,6 +2032,13 @@ async def search(
             "has_abstract": has_abstract,
             "mesh": mesh,
         }
+
+        previous_url = (
+            _build_url("/search", {**base_params, "page": page_i - 1})
+            if page_i > 1
+            else None
+        )
+
         next_url = (
             _build_url("/search", {**base_params, "page": page_i + 1})
             if page_i < total_pages
@@ -2070,6 +2077,7 @@ async def search(
                 "warning": warning,
                 "next_url": next_url,
                 "last_url": last_url,
+                "previous_url": previous_url,
             }
         )
         return templates.TemplateResponse(request, "results.html", ctx)
@@ -2150,6 +2158,12 @@ async def search(
             "mesh": mesh,
         }
 
+        previous_url = (
+            _build_url("/search", {**base_params, "page": page_i - 1})
+            if page_i > 1
+            else None
+        )
+
         next_url = (
             _build_url("/search", {**base_params, "page": page_i + 1})
             if page_i < total_pages
@@ -2188,6 +2202,7 @@ async def search(
                 "warning": warning,
                 "next_url": next_url,
                 "last_url": last_url,
+                "previous_url": previous_url,
             }
         )
         return templates.TemplateResponse(request, "results.html", ctx)
@@ -2278,6 +2293,12 @@ async def search(
             "mesh": mesh,
         }
 
+        previous_url = (
+            _build_url("/search", {**base_params, "page": page_i - 1})
+            if page_i > 1
+            else None
+        )
+
         next_url = (
             _build_url("/search", {**base_params, "page": page_i + 1})
             if page_i < total_pages
@@ -2317,6 +2338,7 @@ async def search(
                 "warning": warning,
                 "next_url": next_url,
                 "last_url": last_url,
+                "previous_url": previous_url,
             }
         )
 
@@ -2643,6 +2665,12 @@ async def search(
         "mesh_mode": mesh_mode if (mesh or "").strip() else None,
     }
 
+    previous_url = (
+        _build_url("/search", {**base_params, "page": capped_page - 1})
+        if capped_page > 1
+        else None
+    )
+
     next_url = (
         _build_url("/search", {**base_params, "page": capped_page + 1})
         if capped_page < total_pages_capped
@@ -2681,6 +2709,7 @@ async def search(
             "warning": warning,
             "next_url": next_url,
             "last_url": last_url,
+            "previous_url": previous_url,
         }
     )
 
