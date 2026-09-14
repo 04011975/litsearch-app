@@ -87,3 +87,108 @@ async def test_openalex_year_range_semantics():
     years = [p.year for p in papers if p.year is not None]
     assert years
     assert all(2020 <= y <= 2021 for y in years)
+
+
+def test_openalex_search_retries_after_429(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, data=None):
+            self.status_code = status_code
+            self._data = data or {}
+            self.url = "https://api.openalex.org/works"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._data
+
+    responses = [
+        FakeResponse(429),
+        FakeResponse(
+            200,
+            {
+                "meta": {"count": 1},
+                "results": [
+                    {
+                        "id": "https://openalex.org/W123",
+                        "title": "Test paper",
+                        "publication_year": 2024,
+                        "doi": "https://doi.org/10.1234/test",
+                        "primary_location": {
+                            "landing_page_url": "https://example.test/paper",
+                            "source": {"display_name": "Test Journal"},
+                        },
+                        "authorships": [
+                            {
+                                "author": {
+                                    "display_name": "Test Author",
+                                }
+                            }
+                        ],
+                        "concepts": [],
+                        "abstract": "Test abstract",
+                    }
+                ],
+            },
+        ),
+    ]
+
+    def fake_get(*args, **kwargs):
+        calls.append(1)
+        return responses.pop(0)
+
+    monkeypatch.setattr(
+        "app.connectors.openalex.requests.get",
+        fake_get,
+    )
+    monkeypatch.setattr(
+        "app.connectors.openalex.time.sleep",
+        lambda seconds: None,
+    )
+
+    papers, total = openalex_search(
+        "cancer",
+        page=1,
+        n=10,
+        sort="relevance",
+    )
+
+    assert len(calls) == 2
+    assert total == 1
+    assert len(papers) == 1
+    assert papers[0].id == "W123"
+
+
+def test_openalex_search_stops_after_repeated_429(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        status_code = 429
+        headers = {}
+        url = "https://api.openalex.org/works"
+
+    def fake_get(*args, **kwargs):
+        calls.append(1)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.connectors.openalex.requests.get",
+        fake_get,
+    )
+    monkeypatch.setattr(
+        "app.connectors.openalex.time.sleep",
+        lambda seconds: None,
+    )
+
+    papers, total = openalex_search(
+        "cancer",
+        page=1,
+        n=10,
+        sort="relevance",
+    )
+
+    assert len(calls) == 3
+    assert papers == []
+    assert total == 0

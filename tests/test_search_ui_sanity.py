@@ -621,3 +621,109 @@ def test_pubmed_previous_navigation_goes_to_previous_page(
     )
 
     assert "page=1" in previous_link
+
+
+def test_openalex_page_one_fetches_upstream_only_once(client, monkeypatch):
+    calls = []
+
+    def fake_openalex_search(*args, **kwargs):
+        calls.append(
+            {
+                "page": kwargs.get("page"),
+                "n": kwargs.get("n"),
+            }
+        )
+        return (
+            [
+                Paper(
+                    id="openalex-test-id",
+                    source="openalex",
+                    title="Test OpenAlex paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://openalex.org/W123456789",
+                    mesh_terms=[],
+                    has_full_text=True,
+                )
+            ],
+            15,
+        )
+
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["page"] == 1
+    assert calls[0]["n"] == 5
+
+
+def test_openalex_uses_cached_page_without_upstream_call(client, monkeypatch):
+    async def fake_cache_get_json(redis, key):
+        if key.startswith("cache:openalex:meta"):
+            return {"total_count": 15}
+
+        if key.startswith("cache:openalex:page"):
+            return {
+                "papers": [
+                    Paper(
+                        id="cached-openalex-id",
+                        source="openalex",
+                        title="Cached OpenAlex paper",
+                        authors=["Cached Author"],
+                        journal="Cached Journal",
+                        year=2024,
+                        abstract="Cached abstract",
+                        doi="10.1234/cached",
+                        pmcid=None,
+                        url="https://openalex.org/W987654321",
+                        mesh_terms=[],
+                        has_full_text=True,
+                    ).to_dict()
+                ]
+            }
+
+        return None
+
+    def fail_openalex_search(*args, **kwargs):
+        raise AssertionError("openalex_search should not be called on a page cache hit")
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json",
+        fake_cache_get_json,
+    )
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fail_openalex_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert "Cached OpenAlex paper" in r.text

@@ -6,6 +6,8 @@ from typing import Tuple, List, Optional
 
 import requests
 
+import time
+
 from app.models.paper import Paper
 
 logger = logging.getLogger("litsearch.connector.openalex")
@@ -23,6 +25,7 @@ def _user_agent() -> str:
         return f"{TOOL_NAME}/0.1 (mailto:{CONTACT_EMAIL})"
     return f"{TOOL_NAME}/0.1"
 
+
 def _openalex_short_id(raw_id: str) -> str:
     s = (raw_id or "").strip()
     if not s:
@@ -31,13 +34,23 @@ def _openalex_short_id(raw_id: str) -> str:
     # https://openalex.org/W123 -> W123
     return s.split("/")[-1]
 
+
 def _map_sort(sort: str) -> Optional[str]:
     s = (sort or "").strip().lower()
 
     if s in {"", "default", "relevance", "relevance_score"}:
         return "relevance_score:desc"
 
-    if s in {"date_desc", "year", "newest", "latest", "recent", "date", "publication_date", "publication_year"}:
+    if s in {
+        "date_desc",
+        "year",
+        "newest",
+        "latest",
+        "recent",
+        "date",
+        "publication_date",
+        "publication_year",
+    }:
         return "publication_date:desc"
 
     if s in {"date_asc", "oldest", "oldest first"}:
@@ -48,14 +61,16 @@ def _map_sort(sort: str) -> Optional[str]:
 
     return sort
 
+
 def _normalize_doi(raw: Optional[str]) -> Optional[str]:
     if not raw:
         return None
     s = raw.strip().lower()
     for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
         if s.startswith(prefix):
-            s = s[len(prefix):].strip()
+            s = s[len(prefix) :].strip()
     return s or None
+
 
 def _extract_authors(work: dict) -> List[str]:
     authorships = work.get("authorships") or []
@@ -67,12 +82,14 @@ def _extract_authors(work: dict) -> List[str]:
             out.append(name)
     return out
 
+
 def _landing_url(work: dict) -> Optional[str]:
     primary_location = work.get("primary_location") or {}
     url = primary_location.get("landing_page_url")
     if url:
         return url
     return work.get("id")
+
 
 def _openalex_abstract_from_inverted_index(inv: dict) -> str:
     if not isinstance(inv, dict):
@@ -90,13 +107,17 @@ def _openalex_abstract_from_inverted_index(inv: dict) -> str:
         return ""
     return " ".join(word for _, word in sorted(pos_to_word.items()))
 
+
 def _journal_name(work: dict) -> str:
     # Primary location source name (preferred)
-    j = ((work.get("primary_location") or {}).get("source") or {}).get("display_name") or ""
+    j = ((work.get("primary_location") or {}).get("source") or {}).get(
+        "display_name"
+    ) or ""
     if j:
         return j
     # Fallback for older payload variants
     return ((work.get("host_venue") or {}).get("display_name") or "").strip()
+
 
 def _build_filter(year_min: Optional[int], year_max: Optional[int]) -> Optional[str]:
     """
@@ -146,23 +167,47 @@ def openalex_search(
 
     logger.info(
         "openalex_search q=%r page=%s n=%s sort=%r filter=%r",
-        q, page, n, params.get("sort"), params.get("filter"),
+        q,
+        page,
+        n,
+        params.get("sort"),
+        params.get("filter"),
     )
 
-    try:
-        r = requests.get(
-            f"{BASE_URL}{SEARCH_ENDPOINT}",
-            params=params,
-            timeout=(10, 90),
-            headers={"User-Agent": _user_agent()},
-        )
-    except requests.RequestException as e:
-        logger.exception("openalex_search request failed: %s", e)
-        return [], 0
+    max_attempts = 3
 
-    if r.status_code == 429:
-        logger.warning("openalex_search rate limited (429) url=%s", getattr(r, "url", ""))
-        return [], 0
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = requests.get(
+                f"{BASE_URL}{SEARCH_ENDPOINT}",
+                params=params,
+                timeout=(10, 90),
+                headers={"User-Agent": _user_agent()},
+            )
+        except requests.RequestException as e:
+            logger.exception("openalex_search request failed: %s", e)
+            return [], 0
+
+        if r.status_code != 429:
+            break
+
+        logger.warning(
+            "openalex_search rate limited (429) attempt=%s/%s url=%s",
+            attempt,
+            max_attempts,
+            getattr(r, "url", ""),
+        )
+
+        if attempt == max_attempts:
+            return [], 0
+
+        retry_after = (getattr(r, "headers", {}) or {}).get("Retry-After")
+        try:
+            delay = float(retry_after) if retry_after else float(attempt)
+        except (TypeError, ValueError):
+            delay = float(attempt)
+
+        time.sleep(delay)
 
     try:
         r.raise_for_status()
@@ -189,7 +234,10 @@ def openalex_search(
 
         doi = _normalize_doi(w.get("doi"))
         url = ((w.get("primary_location") or {}).get("landing_page_url")) or w.get("id")
-        journal = (((w.get("primary_location") or {}).get("source") or {}).get("display_name") or "").strip()
+        journal = (
+            ((w.get("primary_location") or {}).get("source") or {}).get("display_name")
+            or ""
+        ).strip()
 
         concepts = [
             str(c.get("display_name")).strip()
@@ -227,6 +275,7 @@ def openalex_search(
 
     return papers, total
 
+
 def openalex_fetch_detail(work_id: str) -> Paper | None:
     wid = (work_id or "").strip()
     if not wid:
@@ -248,7 +297,11 @@ def openalex_fetch_detail(work_id: str) -> Paper | None:
         if r.status_code == 404:
             return None
         if r.status_code == 429:
-            logger.warning("openalex_fetch_detail rate limited (429) wid=%s url=%s", wid_short, getattr(r, "url", ""))
+            logger.warning(
+                "openalex_fetch_detail rate limited (429) wid=%s url=%s",
+                wid_short,
+                getattr(r, "url", ""),
+            )
             return None
         r.raise_for_status()
         w = r.json() or {}
@@ -256,7 +309,7 @@ def openalex_fetch_detail(work_id: str) -> Paper | None:
         logger.exception("openalex_fetch_detail failed work_id=%r", work_id)
         return None
 
-    openalex_id_full = (w.get("id") or wid)
+    openalex_id_full = w.get("id") or wid
     openalex_id_short = _openalex_short_id(openalex_id_full)
 
     journal = _journal_name(w)
