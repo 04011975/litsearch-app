@@ -420,3 +420,204 @@ def test_all_sources_goto_page_preserves_snapshot_id(
 
     assert 'name="snapshot_id"' in goto_form
     assert 'value="snapshot-test-123"' in goto_form
+
+
+def test_doaj_previous_navigation_goes_to_previous_page(
+    client,
+    monkeypatch,
+):
+    def fake_doaj_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="doaj-test-id",
+                    source="doaj",
+                    title="Test DOAJ paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doaj.org/article/doaj-test-id",
+                    mesh_terms=[],
+                    has_full_text=True,
+                )
+            ],
+            15,
+        )
+
+    monkeypatch.setattr("app.main.doaj_search", fake_doaj_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "doaj",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+
+    previous_link = next(
+        line for line in r.text.splitlines() if ">Previous</a>" in line
+    )
+
+    assert "page=1" in previous_link
+
+
+def test_openalex_previous_navigation_goes_to_previous_page(
+    client,
+    monkeypatch,
+):
+    def fake_openalex_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="openalex-test-id",
+                    source="openalex",
+                    title="Test OpenAlex paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://openalex.org/W123456789",
+                    mesh_terms=[],
+                    has_full_text=True,
+                )
+            ],
+            15,
+        )
+
+    monkeypatch.setattr("app.main.openalex_search", fake_openalex_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+
+    previous_link = next(
+        line for line in r.text.splitlines() if ">Previous</a>" in line
+    )
+
+    assert "page=1" in previous_link
+
+
+def test_crossref_previous_navigation_goes_to_previous_page(
+    client,
+    monkeypatch,
+):
+    def fake_crossref_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="crossref-test-id",
+                    source="crossref",
+                    title="Test Crossref paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doi.org/10.1234/example",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            15,
+        )
+
+    monkeypatch.setattr("app.main.crossref_search", fake_crossref_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+
+    previous_link = next(
+        line for line in r.text.splitlines() if ">Previous</a>" in line
+    )
+
+    assert "page=1" in previous_link
+
+
+def test_pubmed_previous_navigation_goes_to_previous_page(
+    client,
+    monkeypatch,
+):
+    async def fake_pubmed_search_page(*args, **kwargs):
+        class FakeRes:
+            pmids = ["12345"]
+            count = 15
+            webenv = "fake_webenv"
+            query_key = "1"
+
+        return FakeRes()
+
+    async def fake_pubmed_fetch_details(*args, **kwargs):
+        return [
+            Paper(
+                id="12345",
+                source="pubmed",
+                title="Test PubMed paper",
+                authors=["Tester A"],
+                journal="Test Journal",
+                year=2024,
+                abstract="Test abstract",
+                doi="10.1234/example",
+                pmcid=None,
+                url="https://pubmed.ncbi.nlm.nih.gov/12345/",
+                mesh_terms=[],
+                has_full_text=False,
+            )
+        ]
+
+    monkeypatch.setattr(
+        "app.main.pubmed_search_page",
+        fake_pubmed_search_page,
+    )
+    monkeypatch.setattr(
+        "app.main.pubmed_fetch_details",
+        fake_pubmed_fetch_details,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "pubmed",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+
+    previous_link = next(
+        line for line in r.text.splitlines() if ">Previous</a>" in line
+    )
+
+    assert "page=1" in previous_link
