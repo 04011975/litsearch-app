@@ -100,7 +100,7 @@ CONNECTOR_CAPABILITIES: dict[str, SearchSourceCapabilities] = {
                 supports_last=True,
                 supports_page_jump=True,
                 supports_year_filter=True,
-                supports_abstract_filter=True,
+                supports_abstract_filter=False,
                 supports_mesh_filter=False,
             )
         },
@@ -111,7 +111,7 @@ CONNECTOR_CAPABILITIES: dict[str, SearchSourceCapabilities] = {
         modes={
             "default": SearchModeCapabilities(
                 pagination_type="page",
-                supported_sorts=("relevance", "date_desc", "date_asc"),
+                supported_sorts=("relevance",),
                 supports_previous=True,
                 supports_last=True,
                 supports_page_jump=True,

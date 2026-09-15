@@ -77,6 +77,12 @@ def test_doaj_result_window_is_declared():
     assert capabilities.max_result_window == 1000
 
 
+def test_doaj_supports_relevance_sort_only():
+    capabilities = get_search_mode_capabilities("doaj")
+
+    assert capabilities.supported_sorts == ("relevance",)
+
+
 def test_search_source_default_mode_is_used():
     connector = get_search_source_capabilities("semantic_scholar")
     capabilities = get_search_mode_capabilities("semantic_scholar")
@@ -101,3 +107,11 @@ def test_semantic_scholar_relevance_supports_local_filters():
 
     assert capabilities.supports_year_filter is True
     assert capabilities.supports_abstract_filter is True
+
+
+def test_crossref_filter_capabilities():
+    capabilities = get_search_mode_capabilities("crossref")
+
+    assert capabilities.supports_year_filter is True
+    assert capabilities.supports_abstract_filter is False
+    assert capabilities.supports_mesh_filter is False
