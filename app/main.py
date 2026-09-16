@@ -89,6 +89,8 @@ from app.all_sources import (
     all_sources_semantic_scholar_sort_mode,
 )
 
+from app.connector_capabilities import get_search_mode_capabilities
+
 from contextlib import asynccontextmanager
 
 from copy import copy
@@ -1347,13 +1349,19 @@ async def search(
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
 
-    if source == "europe_pmc" and ui_sort != "relevance":
-        warning = "Europe PMC currently supports relevance sorting only."
-        ui_sort = "relevance"
+    if source in {"europe_pmc", "pubmed"}:
+        capabilities = get_search_mode_capabilities(source)
 
-    if source == "pubmed" and ui_sort == "date_asc":
-        warning = "PubMed API currently supports newest-first publication date sorting, but not oldest-first sorting in this integration."
-        ui_sort = "relevance"
+        if ui_sort not in capabilities.supported_sorts:
+            if source == "europe_pmc":
+                warning = "Europe PMC currently supports relevance sorting only."
+            elif source == "pubmed":
+                warning = (
+                    "PubMed API currently supports newest-first publication date sorting, "
+                    "but not oldest-first sorting in this integration."
+                )
+
+            ui_sort = "relevance"
 
     pubmed_sort = all_sources_pubmed_sort(ui_sort)
     openalex_sort = all_sources_openalex_sort(ui_sort)

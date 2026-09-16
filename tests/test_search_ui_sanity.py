@@ -82,6 +82,46 @@ def test_pubmed_mesh_mode_preserved_in_html(client, monkeypatch):
     assert 'value="Humans|Adolescent"' in r.text
 
 
+def test_pubmed_unsupported_date_asc_falls_back_to_relevance(client, monkeypatch):
+    received_sorts = []
+
+    async def fake_pubmed_search_page(*args, **kwargs):
+        received_sorts.append(kwargs.get("sort"))
+
+        class FakeRes:
+            pmids = []
+            count = 0
+            webenv = "fake_webenv"
+            query_key = "1"
+
+        return FakeRes()
+
+    async def fake_pubmed_fetch_details(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.main.pubmed_search_page",
+        fake_pubmed_search_page,
+    )
+    monkeypatch.setattr(
+        "app.main.pubmed_fetch_details",
+        fake_pubmed_fetch_details,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "pubmed",
+            "n": 5,
+            "sort": "date_asc",
+        },
+    )
+
+    assert r.status_code == 200
+    assert received_sorts == ["relevance"]
+
+
 def test_epmc_search_shows_source(client):
     r = client.get(
         "/search",
@@ -193,6 +233,32 @@ def test_europe_pmc_previous_navigation_uses_previous_chunk_cursor(client, monke
     assert ">Previous</a>" in r.text
     assert "page=100" in r.text
     assert "cursor=previous-chunk-cursor" in r.text
+
+
+def test_europe_pmc_unsupported_sort_falls_back_to_relevance(client, monkeypatch):
+    received_sorts = []
+
+    async def fake_europe_pmc_search(*args, **kwargs):
+        received_sorts.append(kwargs.get("sort"))
+        return [], 0, None
+
+    monkeypatch.setattr(
+        "app.main._europe_pmc_search_compat_async",
+        fake_europe_pmc_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "europe_pmc",
+            "n": 5,
+            "sort": "date_desc",
+        },
+    )
+
+    assert r.status_code == 200
+    assert received_sorts == ["relevance"]
 
 
 def test_semantic_scholar_relevance_previous_navigation(client, monkeypatch):
