@@ -163,3 +163,15 @@ def get_search_mode_capabilities(
     connector = get_search_source_capabilities(source)
     resolved_mode = mode or connector.default_mode
     return connector.modes[resolved_mode]
+
+
+def get_search_source_supported_sorts(source: str) -> tuple[str, ...]:
+    connector = get_search_source_capabilities(source)
+
+    supported_sorts: list[str] = []
+    for mode in connector.modes.values():
+        for sort in mode.supported_sorts:
+            if sort not in supported_sorts:
+                supported_sorts.append(sort)
+
+    return tuple(supported_sorts)

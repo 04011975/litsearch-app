@@ -89,7 +89,10 @@ from app.all_sources import (
     all_sources_semantic_scholar_sort_mode,
 )
 
-from app.connector_capabilities import get_search_mode_capabilities
+from app.connector_capabilities import (
+    get_search_mode_capabilities,
+    get_search_source_supported_sorts,
+)
 
 from contextlib import asynccontextmanager
 
@@ -1172,6 +1175,7 @@ def _template_base_context(
         "n": n,
         "page": page,
         "sort": sort,  # UI sort token (relevance/date_desc/date_asc)
+        "supported_sorts": get_search_source_supported_sorts(source),
         "year_min": year_min,
         "year_max": year_max,
         "has_abstract": has_abstract,

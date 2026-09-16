@@ -122,6 +122,44 @@ def test_pubmed_unsupported_date_asc_falls_back_to_relevance(client, monkeypatch
     assert received_sorts == ["relevance"]
 
 
+def test_pubmed_sort_options_match_capabilities(client, monkeypatch):
+    async def fake_pubmed_search_page(*args, **kwargs):
+        class FakeRes:
+            pmids = []
+            count = 0
+            webenv = "fake_webenv"
+            query_key = "1"
+
+        return FakeRes()
+
+    async def fake_pubmed_fetch_details(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.main.pubmed_search_page",
+        fake_pubmed_search_page,
+    )
+    monkeypatch.setattr(
+        "app.main.pubmed_fetch_details",
+        fake_pubmed_fetch_details,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "pubmed",
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<option value="relevance"' in r.text
+    assert '<option value="date_desc"' in r.text
+    assert '<option value="date_asc"' not in r.text
+
+
 def test_epmc_search_shows_source(client):
     r = client.get(
         "/search",

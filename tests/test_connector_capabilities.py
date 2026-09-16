@@ -2,8 +2,9 @@ import pytest
 
 from app.connector_capabilities import (
     CONNECTOR_CAPABILITIES,
-    get_search_source_capabilities,
     get_search_mode_capabilities,
+    get_search_source_capabilities,
+    get_search_source_supported_sorts,
 )
 
 
@@ -64,6 +65,13 @@ def test_semantic_scholar_bulk_capabilities():
     assert capabilities.supports_year_filter is True
 
 
+def test_pubmed_ui_sorts_match_default_mode():
+    assert get_search_source_supported_sorts("pubmed") == (
+        "relevance",
+        "date_desc",
+    )
+
+
 def test_pubmed_oldest_first_is_not_declared_supported():
     capabilities = get_search_mode_capabilities("pubmed")
 
@@ -115,3 +123,11 @@ def test_crossref_filter_capabilities():
     assert capabilities.supports_year_filter is True
     assert capabilities.supports_abstract_filter is False
     assert capabilities.supports_mesh_filter is False
+
+
+def test_semantic_scholar_ui_sorts_include_all_modes():
+    assert get_search_source_supported_sorts("semantic_scholar") == (
+        "relevance",
+        "date_desc",
+        "date_asc",
+    )

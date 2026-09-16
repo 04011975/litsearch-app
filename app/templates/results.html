@@ -115,20 +115,28 @@
   </select>
 
 <select name="sort">
-  {% if current_source == "semantic_scholar" %}
+  {% if "relevance" in supported_sorts %}
     <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
-    <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first (chronological mode)</option>
-    <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first (chronological mode)</option>
-  {% else %}
-    <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
+  {% endif %}
 
-    {% if current_source not in ["europe_pmc", "doaj"] %}
-      <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first</option>
-    {% endif %}
+  {% if "date_desc" in supported_sorts %}
+    <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>
+      {% if current_source == "semantic_scholar" %}
+        Most recent first (chronological mode)
+      {% else %}
+        Most recent first
+      {% endif %}
+    </option>
+  {% endif %}
 
-    {% if current_source not in ["europe_pmc", "pubmed", "doaj"] %}
-      <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first</option>
-    {% endif %}
+  {% if "date_asc" in supported_sorts %}
+    <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>
+      {% if current_source == "semantic_scholar" %}
+        Oldest first (chronological mode)
+      {% else %}
+        Oldest first
+      {% endif %}
+    </option>
   {% endif %}
 </select>
 
