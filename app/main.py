@@ -1176,6 +1176,9 @@ def _template_base_context(
         "page": page,
         "sort": sort,  # UI sort token (relevance/date_desc/date_asc)
         "supported_sorts": get_search_source_supported_sorts(source),
+        "supports_abstract_filter": get_search_mode_capabilities(
+            source
+        ).supports_abstract_filter,
         "year_min": year_min,
         "year_max": year_max,
         "has_abstract": has_abstract,

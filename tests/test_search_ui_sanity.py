@@ -519,6 +519,7 @@ def test_doaj_only_offers_relevance_sort(client, monkeypatch):
     assert '<option value="relevance"' in r.text
     assert '<option value="date_desc"' not in r.text
     assert '<option value="date_asc"' not in r.text
+    assert '<select name="has_abstract">' in r.text
 
 
 def test_doaj_export_limit_stops_at_1000(client, monkeypatch):
@@ -909,6 +910,29 @@ def test_crossref_previous_navigation_goes_to_previous_page(
     )
 
     assert "page=1" in previous_link
+
+
+def test_crossref_does_not_show_abstract_filter(client, monkeypatch):
+    def fake_crossref_search(*args, **kwargs):
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.main.crossref_search",
+        fake_crossref_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<select name="has_abstract">' not in r.text
 
 
 def test_pubmed_previous_navigation_goes_to_previous_page(

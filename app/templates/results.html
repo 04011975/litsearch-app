@@ -162,7 +162,7 @@
     {% endif %}
   />
 
-  {% if current_source != "openalex" %}
+  {% if supports_abstract_filter %}
     <select name="has_abstract">
       <option value="0" {% if has_abstract == 0 %}selected{% endif %}>All records</option>
       <option value="1" {% if has_abstract == 1 %}selected{% endif %}>Abstract available</option>
