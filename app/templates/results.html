@@ -115,20 +115,28 @@
   </select>
 
 <select name="sort">
-  {% if current_source == "semantic_scholar" %}
+  {% if "relevance" in supported_sorts %}
     <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
-    <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first (chronological mode)</option>
-    <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first (chronological mode)</option>
-  {% else %}
-    <option value="relevance" {{ 'selected' if sort=='relevance' else '' }}>Relevance</option>
+  {% endif %}
 
-    {% if current_source not in ["europe_pmc", "doaj"] %}
-      <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>Most recent first</option>
-    {% endif %}
+  {% if "date_desc" in supported_sorts %}
+    <option value="date_desc" {{ 'selected' if sort=='date_desc' else '' }}>
+      {% if current_source == "semantic_scholar" %}
+        Most recent first (chronological mode)
+      {% else %}
+        Most recent first
+      {% endif %}
+    </option>
+  {% endif %}
 
-    {% if current_source not in ["europe_pmc", "pubmed", "doaj"] %}
-      <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>Oldest first</option>
-    {% endif %}
+  {% if "date_asc" in supported_sorts %}
+    <option value="date_asc" {{ 'selected' if sort=='date_asc' else '' }}>
+      {% if current_source == "semantic_scholar" %}
+        Oldest first (chronological mode)
+      {% else %}
+        Oldest first
+      {% endif %}
+    </option>
   {% endif %}
 </select>
 
@@ -154,7 +162,7 @@
     {% endif %}
   />
 
-  {% if current_source != "openalex" %}
+  {% if supports_abstract_filter %}
     <select name="has_abstract">
       <option value="0" {% if has_abstract == 0 %}selected{% endif %}>All records</option>
       <option value="1" {% if has_abstract == 1 %}selected{% endif %}>Abstract available</option>
@@ -312,14 +320,14 @@
 
   {# PREVIOUS #}
 
-  {% if current_source == "europe_pmc" %}
-    {% if epmc_previous_url %}
-      <a href="{{ epmc_previous_url }}">Previous</a>
-    {% else %}
-      <span class="muted">Previous</span>
-    {% endif %}
-  {% elif current_source in ["all", "doaj", "openalex", "crossref", "pubmed", "semantic_scholar"] %}
-    {% if previous_url %}
+  {% if supports_previous %}
+    {% if current_source == "europe_pmc" %}
+      {% if epmc_previous_url %}
+        <a href="{{ epmc_previous_url }}">Previous</a>
+      {% else %}
+        <span class="muted">Previous</span>
+      {% endif %}
+    {% elif previous_url %}
       <a href="{{ previous_url }}">Previous</a>
     {% else %}
       <span class="muted">Previous</span>
@@ -354,7 +362,7 @@
       {% else %}
         <span class="muted" title="Europe PMC uses cursor-based pagination; 'Last' requires a built cursor chain.">Last</span>
       {% endif %}
-    {% elif current_source == "semantic_scholar" %}
+    {% elif not supports_last %}
       <span class="muted" title="Direct jump to the last page is unavailable for Semantic Scholar. Relevance mode is capped, and chronological mode uses token-based pagination.">Last</span>
     {% else %}
       {% if last_url %}
@@ -370,7 +378,7 @@
   {% endif %}
 
   {# GO TO PAGE #}
-  {% set goto_disabled = (current_source == "europe_pmc" and not allow_deep_paging) or ss_bulk_mode %}
+  {% set goto_disabled = (not supports_page_jump) or (current_source == "europe_pmc" and not allow_deep_paging) %}
   <form id="goto_form" action="/search" method="get" style="display:inline;">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="source" value="{{ current_source }}">

@@ -89,6 +89,11 @@ from app.all_sources import (
     all_sources_semantic_scholar_sort_mode,
 )
 
+from app.connector_capabilities import (
+    get_search_mode_capabilities,
+    get_search_source_supported_sorts,
+)
+
 from contextlib import asynccontextmanager
 
 from copy import copy
@@ -1170,6 +1175,13 @@ def _template_base_context(
         "n": n,
         "page": page,
         "sort": sort,  # UI sort token (relevance/date_desc/date_asc)
+        "supported_sorts": get_search_source_supported_sorts(source),
+        "supports_abstract_filter": get_search_mode_capabilities(
+            source
+        ).supports_abstract_filter,
+        "supports_page_jump": get_search_mode_capabilities(source).supports_page_jump,
+        "supports_last": get_search_mode_capabilities(source).supports_last,
+        "supports_previous": get_search_mode_capabilities(source).supports_previous,
         "year_min": year_min,
         "year_max": year_max,
         "has_abstract": has_abstract,
@@ -1347,13 +1359,19 @@ async def search(
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
 
-    if source == "europe_pmc" and ui_sort != "relevance":
-        warning = "Europe PMC currently supports relevance sorting only."
-        ui_sort = "relevance"
+    if source in {"europe_pmc", "pubmed"}:
+        capabilities = get_search_mode_capabilities(source)
 
-    if source == "pubmed" and ui_sort == "date_asc":
-        warning = "PubMed API currently supports newest-first publication date sorting, but not oldest-first sorting in this integration."
-        ui_sort = "relevance"
+        if ui_sort not in capabilities.supported_sorts:
+            if source == "europe_pmc":
+                warning = "Europe PMC currently supports relevance sorting only."
+            elif source == "pubmed":
+                warning = (
+                    "PubMed API currently supports newest-first publication date sorting, "
+                    "but not oldest-first sorting in this integration."
+                )
+
+            ui_sort = "relevance"
 
     pubmed_sort = all_sources_pubmed_sort(ui_sort)
     openalex_sort = all_sources_openalex_sort(ui_sort)

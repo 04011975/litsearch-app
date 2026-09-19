@@ -1,5 +1,7 @@
 from app.models.paper import Paper
 
+from app.main import _template_base_context
+
 import html
 import re
 
@@ -8,6 +10,44 @@ def test_search_page_loads(client):
     r = client.get("/search")
     assert r.status_code == 200
     assert "Search Results" in r.text or "LitSearch" in r.text
+
+
+def test_template_context_exposes_semantic_scholar_last_capability(client):
+    request = client.get("/search").request
+
+    context = _template_base_context(
+        request,
+        q="glioblastoma",
+        source="semantic_scholar",
+        n=5,
+        page=2,
+        sort="relevance",
+        year_min="",
+        year_max="",
+        has_abstract=0,
+        mesh="",
+    )
+
+    assert context["supports_last"] is False
+
+
+def test_template_context_exposes_previous_capability(client):
+    request = client.get("/search").request
+
+    context = _template_base_context(
+        request,
+        q="glioblastoma",
+        source="semantic_scholar",
+        n=5,
+        page=2,
+        sort="relevance",
+        year_min="",
+        year_max="",
+        has_abstract=0,
+        mesh="",
+    )
+
+    assert context["supports_previous"] is True
 
 
 def test_pubmed_search_page_has_results(client):
@@ -82,6 +122,84 @@ def test_pubmed_mesh_mode_preserved_in_html(client, monkeypatch):
     assert 'value="Humans|Adolescent"' in r.text
 
 
+def test_pubmed_unsupported_date_asc_falls_back_to_relevance(client, monkeypatch):
+    received_sorts = []
+
+    async def fake_pubmed_search_page(*args, **kwargs):
+        received_sorts.append(kwargs.get("sort"))
+
+        class FakeRes:
+            pmids = []
+            count = 0
+            webenv = "fake_webenv"
+            query_key = "1"
+
+        return FakeRes()
+
+    async def fake_pubmed_fetch_details(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.main.pubmed_search_page",
+        fake_pubmed_search_page,
+    )
+    monkeypatch.setattr(
+        "app.main.pubmed_fetch_details",
+        fake_pubmed_fetch_details,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "pubmed",
+            "n": 5,
+            "sort": "date_asc",
+        },
+    )
+
+    assert r.status_code == 200
+    assert received_sorts == ["relevance"]
+
+
+def test_pubmed_sort_options_match_capabilities(client, monkeypatch):
+    async def fake_pubmed_search_page(*args, **kwargs):
+        class FakeRes:
+            pmids = []
+            count = 0
+            webenv = "fake_webenv"
+            query_key = "1"
+
+        return FakeRes()
+
+    async def fake_pubmed_fetch_details(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "app.main.pubmed_search_page",
+        fake_pubmed_search_page,
+    )
+    monkeypatch.setattr(
+        "app.main.pubmed_fetch_details",
+        fake_pubmed_fetch_details,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "pubmed",
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<option value="relevance"' in r.text
+    assert '<option value="date_desc"' in r.text
+    assert '<option value="date_asc"' not in r.text
+
+
 def test_epmc_search_shows_source(client):
     r = client.get(
         "/search",
@@ -125,6 +243,9 @@ def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatc
         fake_europe_pmc_search,
     )
 
+    monkeypatch.setattr("app.main._redis", object())
+    monkeypatch.setattr("app.main.ARQ_REDIS", object())
+
     r = client.get(
         "/search",
         params={
@@ -140,6 +261,18 @@ def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatc
     assert r.status_code == 200
     assert ">Previous</a>" in r.text
     assert "page=1" in r.text
+    assert ">Last</a>" in r.text
+
+    assert 'id="goto_page_input"' in r.text
+    assert 'id="goto_page_input"\n      type="number"\n      name="page"' in r.text
+    assert (
+        'name="page"\n'
+        '      value="2"\n'
+        '      min="1"\n'
+        '      max="40"\n'
+        '      style="width: 5rem;"\n'
+        "      disabled" not in r.text
+    )
 
 
 def test_europe_pmc_previous_navigation_uses_previous_chunk_cursor(client, monkeypatch):
@@ -195,6 +328,32 @@ def test_europe_pmc_previous_navigation_uses_previous_chunk_cursor(client, monke
     assert "cursor=previous-chunk-cursor" in r.text
 
 
+def test_europe_pmc_unsupported_sort_falls_back_to_relevance(client, monkeypatch):
+    received_sorts = []
+
+    async def fake_europe_pmc_search(*args, **kwargs):
+        received_sorts.append(kwargs.get("sort"))
+        return [], 0, None
+
+    monkeypatch.setattr(
+        "app.main._europe_pmc_search_compat_async",
+        fake_europe_pmc_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "europe_pmc",
+            "n": 5,
+            "sort": "date_desc",
+        },
+    )
+
+    assert r.status_code == 200
+    assert received_sorts == ["relevance"]
+
+
 def test_semantic_scholar_relevance_previous_navigation(client, monkeypatch):
     def fake_semantic_scholar_search(*args, **kwargs):
         papers = [
@@ -234,6 +393,12 @@ def test_semantic_scholar_relevance_previous_navigation(client, monkeypatch):
 
     assert r.status_code == 200
     assert ">Previous</a>" in r.text
+    assert 'id="goto_page_input"' in r.text
+    assert 'id="goto_page_input"\n      type="number"\n      name="page"' in r.text
+    assert (
+        'name="page"\n      value="2"\n      min="1"\n      max="10"\n      style="width: 5rem;"\n      disabled'
+        in r.text
+    )
     assert "page=1" in r.text
 
 
@@ -415,6 +580,7 @@ def test_doaj_only_offers_relevance_sort(client, monkeypatch):
     assert '<option value="relevance"' in r.text
     assert '<option value="date_desc"' not in r.text
     assert '<option value="date_asc"' not in r.text
+    assert '<select name="has_abstract">' in r.text
 
 
 def test_doaj_export_limit_stops_at_1000(client, monkeypatch):
@@ -805,6 +971,29 @@ def test_crossref_previous_navigation_goes_to_previous_page(
     )
 
     assert "page=1" in previous_link
+
+
+def test_crossref_does_not_show_abstract_filter(client, monkeypatch):
+    def fake_crossref_search(*args, **kwargs):
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.main.crossref_search",
+        fake_crossref_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<select name="has_abstract">' not in r.text
 
 
 def test_pubmed_previous_navigation_goes_to_previous_page(
