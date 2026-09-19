@@ -31,6 +31,25 @@ def test_template_context_exposes_semantic_scholar_last_capability(client):
     assert context["supports_last"] is False
 
 
+def test_template_context_exposes_previous_capability(client):
+    request = client.get("/search").request
+
+    context = _template_base_context(
+        request,
+        q="glioblastoma",
+        source="semantic_scholar",
+        n=5,
+        page=2,
+        sort="relevance",
+        year_min="",
+        year_max="",
+        has_abstract=0,
+        mesh="",
+    )
+
+    assert context["supports_previous"] is True
+
+
 def test_pubmed_search_page_has_results(client):
     r = client.get(
         "/search",

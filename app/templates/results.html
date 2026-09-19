@@ -320,14 +320,14 @@
 
   {# PREVIOUS #}
 
-  {% if current_source == "europe_pmc" %}
-    {% if epmc_previous_url %}
-      <a href="{{ epmc_previous_url }}">Previous</a>
-    {% else %}
-      <span class="muted">Previous</span>
-    {% endif %}
-  {% elif current_source in ["all", "doaj", "openalex", "crossref", "pubmed", "semantic_scholar"] %}
-    {% if previous_url %}
+  {% if supports_previous %}
+    {% if current_source == "europe_pmc" %}
+      {% if epmc_previous_url %}
+        <a href="{{ epmc_previous_url }}">Previous</a>
+      {% else %}
+        <span class="muted">Previous</span>
+      {% endif %}
+    {% elif previous_url %}
       <a href="{{ previous_url }}">Previous</a>
     {% else %}
       <span class="muted">Previous</span>
