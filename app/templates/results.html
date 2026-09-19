@@ -378,7 +378,7 @@
   {% endif %}
 
   {# GO TO PAGE #}
-  {% set goto_disabled = (current_source == "europe_pmc" and not allow_deep_paging) or ss_bulk_mode %}
+  {% set goto_disabled = (not supports_page_jump) or (current_source == "europe_pmc" and not allow_deep_paging) %}
   <form id="goto_form" action="/search" method="get" style="display:inline;">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="source" value="{{ current_source }}">

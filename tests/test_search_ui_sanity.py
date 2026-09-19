@@ -203,6 +203,9 @@ def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatc
         fake_europe_pmc_search,
     )
 
+    monkeypatch.setattr("app.main._redis", object())
+    monkeypatch.setattr("app.main.ARQ_REDIS", object())
+
     r = client.get(
         "/search",
         params={
@@ -218,6 +221,17 @@ def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatc
     assert r.status_code == 200
     assert ">Previous</a>" in r.text
     assert "page=1" in r.text
+
+    assert 'id="goto_page_input"' in r.text
+    assert 'id="goto_page_input"\n      type="number"\n      name="page"' in r.text
+    assert (
+        'name="page"\n'
+        '      value="2"\n'
+        '      min="1"\n'
+        '      max="40"\n'
+        '      style="width: 5rem;"\n'
+        "      disabled" not in r.text
+    )
 
 
 def test_europe_pmc_previous_navigation_uses_previous_chunk_cursor(client, monkeypatch):
@@ -338,6 +352,12 @@ def test_semantic_scholar_relevance_previous_navigation(client, monkeypatch):
 
     assert r.status_code == 200
     assert ">Previous</a>" in r.text
+    assert 'id="goto_page_input"' in r.text
+    assert 'id="goto_page_input"\n      type="number"\n      name="page"' in r.text
+    assert (
+        'name="page"\n      value="2"\n      min="1"\n      max="10"\n      style="width: 5rem;"\n      disabled'
+        in r.text
+    )
     assert "page=1" in r.text
 
 
