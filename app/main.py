@@ -1180,6 +1180,7 @@ def _template_base_context(
             source
         ).supports_abstract_filter,
         "supports_page_jump": get_search_mode_capabilities(source).supports_page_jump,
+        "supports_last": get_search_mode_capabilities(source).supports_last,
         "year_min": year_min,
         "year_max": year_max,
         "has_abstract": has_abstract,

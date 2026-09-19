@@ -362,7 +362,7 @@
       {% else %}
         <span class="muted" title="Europe PMC uses cursor-based pagination; 'Last' requires a built cursor chain.">Last</span>
       {% endif %}
-    {% elif current_source == "semantic_scholar" %}
+    {% elif not supports_last %}
       <span class="muted" title="Direct jump to the last page is unavailable for Semantic Scholar. Relevance mode is capped, and chronological mode uses token-based pagination.">Last</span>
     {% else %}
       {% if last_url %}

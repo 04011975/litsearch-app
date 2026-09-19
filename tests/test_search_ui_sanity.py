@@ -1,5 +1,7 @@
 from app.models.paper import Paper
 
+from app.main import _template_base_context
+
 import html
 import re
 
@@ -8,6 +10,25 @@ def test_search_page_loads(client):
     r = client.get("/search")
     assert r.status_code == 200
     assert "Search Results" in r.text or "LitSearch" in r.text
+
+
+def test_template_context_exposes_semantic_scholar_last_capability(client):
+    request = client.get("/search").request
+
+    context = _template_base_context(
+        request,
+        q="glioblastoma",
+        source="semantic_scholar",
+        n=5,
+        page=2,
+        sort="relevance",
+        year_min="",
+        year_max="",
+        has_abstract=0,
+        mesh="",
+    )
+
+    assert context["supports_last"] is False
 
 
 def test_pubmed_search_page_has_results(client):
@@ -221,6 +242,7 @@ def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatc
     assert r.status_code == 200
     assert ">Previous</a>" in r.text
     assert "page=1" in r.text
+    assert ">Last</a>" in r.text
 
     assert 'id="goto_page_input"' in r.text
     assert 'id="goto_page_input"\n      type="number"\n      name="page"' in r.text
