@@ -274,6 +274,51 @@ async def test_fetch_all_source_candidates_passes_abstract_filter_to_openalex(
 @patch("app.all_sources.openalex_search")
 @patch("app.all_sources.pubmed_fetch_details", new_callable=AsyncMock)
 @patch("app.all_sources.pubmed_search_page", new_callable=AsyncMock)
+async def test_fetch_all_source_candidates_passes_abstract_filter_to_crossref(
+    mock_pubmed_search_page,
+    mock_pubmed_fetch_details,
+    mock_openalex_search,
+    mock_crossref_search,
+    mock_doaj_search,
+    mock_europe_pmc_search,
+    mock_semantic_scholar_search,
+) -> None:
+    pubmed_result = Mock()
+    pubmed_result.pmids = []
+    mock_pubmed_search_page.return_value = pubmed_result
+    mock_pubmed_fetch_details.return_value = []
+
+    mock_openalex_search.return_value = ([], 0)
+    mock_crossref_search.return_value = ([], 0)
+    mock_doaj_search.return_value = ([], 0)
+    mock_europe_pmc_search.return_value = ([], 0, None)
+    mock_semantic_scholar_search.return_value = ([], 0)
+
+    await fetch_all_source_candidates(
+        q="cancer",
+        candidate_n=20,
+        has_abstract=True,
+    )
+
+    mock_crossref_search.assert_called_once_with(
+        "cancer",
+        page=1,
+        n=20,
+        sort="relevance",
+        year_min=None,
+        year_max=None,
+        has_abstract=True,
+    )
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.search_semantic_scholar")
+@patch("app.all_sources.europe_pmc_search")
+@patch("app.all_sources.doaj_search")
+@patch("app.all_sources.crossref_search")
+@patch("app.all_sources.openalex_search")
+@patch("app.all_sources.pubmed_fetch_details", new_callable=AsyncMock)
+@patch("app.all_sources.pubmed_search_page", new_callable=AsyncMock)
 async def test_fetch_all_source_candidates_passes_abstract_filter_to_semantic_scholar(
     mock_pubmed_search_page,
     mock_pubmed_fetch_details,
