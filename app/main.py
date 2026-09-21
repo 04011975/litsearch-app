@@ -2295,6 +2295,7 @@ async def search(
             sort=ui_sort,
             year_min=year_min_i,
             year_max=year_max_i,
+            has_abstract=bool(has_abstract),
         )
 
         papers = [_paper_to_dict(p, source="crossref") for p in (crossref_papers or [])]
@@ -3506,6 +3507,7 @@ async def export(
                     sort=ui_sort,
                     year_min=year_min_i,
                     year_max=year_max_i,
+                    has_abstract=bool(has_abstract),
                 )
 
                 if not batch:
@@ -3525,6 +3527,7 @@ async def export(
                 sort=ui_sort,
                 year_min=year_min_i,
                 year_max=year_max_i,
+                has_abstract=bool(has_abstract),
             )
             papers = papers or []
 

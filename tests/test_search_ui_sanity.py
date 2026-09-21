@@ -973,7 +973,34 @@ def test_crossref_previous_navigation_goes_to_previous_page(
     assert "page=1" in previous_link
 
 
-def test_crossref_does_not_show_abstract_filter(client, monkeypatch):
+def test_crossref_search_passes_abstract_filter(client, monkeypatch):
+    captured = {}
+
+    def fake_crossref_search(*args, **kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.main.crossref_search",
+        fake_crossref_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert captured["has_abstract"] is True
+
+
+def test_crossref_shows_abstract_filter(client, monkeypatch):
     def fake_crossref_search(*args, **kwargs):
         return [], 0
 
@@ -993,7 +1020,56 @@ def test_crossref_does_not_show_abstract_filter(client, monkeypatch):
     )
 
     assert r.status_code == 200
-    assert '<select name="has_abstract">' not in r.text
+    assert '<select name="has_abstract">' in r.text
+
+
+def test_crossref_abstract_filter_is_preserved_in_next_link(client, monkeypatch):
+    def fake_crossref_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="crossref-test-id",
+                    source="crossref",
+                    title="Test Crossref paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doi.org/10.1234/example",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            15,
+        )
+
+    monkeypatch.setattr(
+        "app.main.crossref_search",
+        fake_crossref_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+
+    next_link = next(
+        line for line in r.text.splitlines() if ">Next</a>" in line
+    )
+
+    assert "page=2" in next_link
+    assert "has_abstract=1" in next_link
 
 
 def test_pubmed_previous_navigation_goes_to_previous_page(

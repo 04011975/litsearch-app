@@ -129,7 +129,7 @@ def test_crossref_filter_capabilities():
     capabilities = get_search_mode_capabilities("crossref")
 
     assert capabilities.supports_year_filter is True
-    assert capabilities.supports_abstract_filter is False
+    assert capabilities.supports_abstract_filter is True
     assert capabilities.supports_mesh_filter is False
 
 

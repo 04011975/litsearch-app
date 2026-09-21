@@ -1161,6 +1161,12 @@ async def _fetch_crossref_export_records(
 ):
     year_min_i = _meta_int(meta, "year_min")
     year_max_i = _meta_int(meta, "year_max")
+    has_abstract = meta.get("has_abstract") in {
+        "1",
+        "true",
+        "True",
+        True,
+    }
 
     page_size = min(100, max(1, int(limit)))
 
@@ -1177,6 +1183,7 @@ async def _fetch_crossref_export_records(
             sort=sort,
             year_min=year_min_i,
             year_max=year_max_i,
+            has_abstract=has_abstract,
         )
 
         if not batch:

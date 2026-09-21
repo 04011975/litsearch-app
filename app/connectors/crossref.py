@@ -81,12 +81,18 @@ def _extract_publication_date(item: dict) -> Optional[str]:
     return None
 
 
-def _build_filter(year_min: Optional[int], year_max: Optional[int]) -> Optional[str]:
+def _build_filter(
+    year_min: Optional[int],
+    year_max: Optional[int],
+    has_abstract: bool = False,
+) -> Optional[str]:
     parts: list[str] = []
     if year_min is not None:
         parts.append(f"from-pub-date:{int(year_min)}-01-01")
     if year_max is not None:
         parts.append(f"until-pub-date:{int(year_max)}-12-31")
+    if has_abstract:
+        parts.append("has-abstract:true")
     return ",".join(parts) if parts else None
 
 
@@ -123,6 +129,7 @@ def crossref_search(
     sort: str = "relevance",
     year_min: Optional[int] = None,
     year_max: Optional[int] = None,
+    has_abstract: bool = False,
 ) -> Tuple[List[Paper], int]:
     q = (q or "").strip()
     page = max(1, int(page))
@@ -146,7 +153,7 @@ def crossref_search(
         params["sort"] = "published"
         params["order"] = "asc"
 
-    filt = _build_filter(year_min, year_max)
+    filt = _build_filter(year_min, year_max, has_abstract)
     if filt:
         params["filter"] = filt
 

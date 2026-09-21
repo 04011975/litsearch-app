@@ -563,6 +563,64 @@ def test_export_all_sources_csv_page(client, monkeypatch):
     assert "text/csv" in r.headers.get("content-type", "")
     assert "Mock All Sources Paper" in r.text
 
+def test_export_crossref_page_passes_abstract_filter(client, monkeypatch):
+    calls = []
+
+    def fake_crossref_search(*args, **kwargs):
+        calls.append(kwargs)
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.crossref_search",
+        fake_crossref_search,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "scope": "page",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["has_abstract"] is True
+
+
+def test_export_crossref_bulk_passes_abstract_filter(client, monkeypatch):
+    calls = []
+
+    def fake_crossref_search(*args, **kwargs):
+        calls.append(kwargs)
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.crossref_search",
+        fake_crossref_search,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "crossref",
+            "scope": "bulk",
+            "bulk_limit": 20,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["has_abstract"] is True
+
 
 def test_export_all_sources_bulk_requires_async_job(client):
     r = client.get(
