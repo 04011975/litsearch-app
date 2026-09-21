@@ -437,9 +437,6 @@ async def fetch_all_source_candidates(
                 q,
                 page=1,
                 n=candidate_n,
-                year_min=year_min,
-                year_max=year_max,
-                has_abstract=has_abstract,
             )
 
             for p in papers or []:
