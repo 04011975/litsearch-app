@@ -84,7 +84,7 @@ CONNECTOR_CAPABILITIES: dict[str, SearchSourceCapabilities] = {
                 supports_last=True,
                 supports_page_jump=True,
                 supports_year_filter=True,
-                supports_abstract_filter=False,
+                supports_abstract_filter=True,
                 supports_mesh_filter=False,
             )
         },

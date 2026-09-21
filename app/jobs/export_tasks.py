@@ -689,6 +689,12 @@ async def _fetch_openalex_export_records(
 
     year_min_i = _meta_int(meta, "year_min")
     year_max_i = _meta_int(meta, "year_max")
+    has_abstract = meta.get("has_abstract") in {
+        "1",
+        "true",
+        "True",
+        True,
+    }
 
     per_page = min(get_export_batch_size("openalex"), limit)
 
@@ -709,6 +715,7 @@ async def _fetch_openalex_export_records(
         "sort": openalex_sort,
         "year_min": year_min_i,
         "year_max": year_max_i,
+        "has_abstract": has_abstract,
     }
 
     next_page = 1
@@ -835,6 +842,7 @@ async def _fetch_openalex_export_records(
                             sort=openalex_sort,
                             year_min=year_min_i,
                             year_max=year_max_i,
+                            has_abstract=has_abstract,
                         )
 
                     batch = batch or []

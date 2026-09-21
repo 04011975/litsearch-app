@@ -275,6 +275,7 @@ async def fetch_all_source_candidates(
                 sort=openalex_sort,
                 year_min=year_min,
                 year_max=year_max,
+                has_abstract=has_abstract,
             )
 
             for p in papers or []:
