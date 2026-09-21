@@ -1056,6 +1056,59 @@ def test_pubmed_previous_navigation_goes_to_previous_page(
     assert "page=1" in previous_link
 
 
+def test_openalex_shows_abstract_filter(client, monkeypatch):
+    def fake_openalex_search(*args, **kwargs):
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<select name="has_abstract">' in r.text
+
+
+def test_openalex_search_passes_abstract_filter(client, monkeypatch):
+    calls = []
+
+    def fake_openalex_search(*args, **kwargs):
+        calls.append(kwargs)
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["has_abstract"] is True
+
+
 def test_openalex_page_one_fetches_upstream_only_once(client, monkeypatch):
     calls = []
 
@@ -1106,6 +1159,67 @@ def test_openalex_page_one_fetches_upstream_only_once(client, monkeypatch):
     assert len(calls) == 1
     assert calls[0]["page"] == 1
     assert calls[0]["n"] == 5
+
+
+def test_openalex_abstract_filter_changes_cache_keys(client, monkeypatch):
+    cache_keys = []
+
+    async def fake_cache_get_json(redis, key):
+        cache_keys.append(key)
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        return None
+
+    def fake_openalex_search(*args, **kwargs):
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json",
+        fake_cache_get_json,
+    )
+    monkeypatch.setattr(
+        "app.main.cache_set_json",
+        fake_cache_set_json,
+    )
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 0,
+        },
+    )
+
+    assert r.status_code == 200
+    keys_without_abstract_filter = list(cache_keys)
+
+    cache_keys.clear()
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    keys_with_abstract_filter = list(cache_keys)
+
+    assert keys_without_abstract_filter != keys_with_abstract_filter
 
 
 def test_openalex_uses_cached_page_without_upstream_call(client, monkeypatch):

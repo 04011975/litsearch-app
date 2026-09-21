@@ -2062,6 +2062,7 @@ async def search(
                 "sort": ui_sort,
                 "year_min": year_min_i,
                 "year_max": year_max_i,
+                "has_abstract": bool(has_abstract),
             },
         )
 
@@ -2078,6 +2079,7 @@ async def search(
                 sort=openalex_sort,  # mapped for API
                 year_min=year_min_i,
                 year_max=year_max_i,
+                has_abstract=bool(has_abstract),
             )
             await cache_set_json(
                 redis, ck_meta, {"total_count": int(total_count)}, OPENALEX_CACHE_TTL_S
@@ -2121,6 +2123,7 @@ async def search(
                 "sort": ui_sort,
                 "year_min": year_min_i,
                 "year_max": year_max_i,
+                "has_abstract": bool(has_abstract),
             },
         )
         cached_page = await cache_get_json(redis, ck_page)
@@ -2152,6 +2155,7 @@ async def search(
                 sort=openalex_sort,  # mapped for API
                 year_min=year_min_i,
                 year_max=year_max_i,
+                has_abstract=bool(has_abstract),
             )
             await cache_set_json(
                 redis,
@@ -3203,6 +3207,7 @@ async def export(
                     "sort": ui_sort,
                     "year_min": year_min,
                     "year_max": year_max,
+                    "has_abstract": bool(has_abstract),
                 },
             )
             cached = await cache_get_json(redis, cache_key) if redis else None
@@ -3223,6 +3228,7 @@ async def export(
                         sort=openalex_sort,
                         year_min=_safe_int(year_min, None),
                         year_max=_safe_int(year_max, None),
+                        has_abstract=bool(has_abstract),
                     )
                     if not batch:
                         break
@@ -3243,6 +3249,7 @@ async def export(
                     "sort": ui_sort,
                     "year_min": year_min,
                     "year_max": year_max,
+                    "has_abstract": bool(has_abstract),
                 },
             )
             cached = await cache_get_json(redis, cache_key) if redis else None
@@ -3257,6 +3264,7 @@ async def export(
                     sort=openalex_sort,
                     year_min=_safe_int(year_min, None),
                     year_max=_safe_int(year_max, None),
+                    has_abstract=bool(has_abstract),
                 )
                 papers = papers or []
                 if redis:

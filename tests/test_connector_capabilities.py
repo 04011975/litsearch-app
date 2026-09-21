@@ -117,6 +117,14 @@ def test_semantic_scholar_relevance_supports_local_filters():
     assert capabilities.supports_abstract_filter is True
 
 
+def test_openalex_filter_capabilities():
+    capabilities = get_search_mode_capabilities("openalex")
+
+    assert capabilities.supports_year_filter is True
+    assert capabilities.supports_abstract_filter is True
+    assert capabilities.supports_mesh_filter is False
+
+
 def test_crossref_filter_capabilities():
     capabilities = get_search_mode_capabilities("crossref")
 

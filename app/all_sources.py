@@ -205,10 +205,16 @@ async def fetch_all_source_candidates(
                 year_max=year_max,
                 has_abstract=has_abstract,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             if not term:
-                return {"source": source, "papers": [], "count": 0, "failed": False}
+                return {
+                    "source": source,
+                    "papers": [],
+                    "count": 0,
+                    "failed": False,
+                }
 
             res = await pubmed_search_page(
                 term,
@@ -249,7 +255,12 @@ async def fetch_all_source_candidates(
 
         except Exception:
             logger.exception("ALL: pubmed failed")
-            return {"source": source, "papers": [], "count": 0, "failed": True}
+            return {
+                "source": source,
+                "papers": [],
+                "count": 0,
+                "failed": True,
+            }
 
     async def _fetch_openalex() -> dict[str, Any]:
         started = time.perf_counter()
@@ -264,6 +275,7 @@ async def fetch_all_source_candidates(
                 sort=openalex_sort,
                 year_min=year_min,
                 year_max=year_max,
+                has_abstract=has_abstract,
             )
 
             for p in papers or []:
@@ -424,6 +436,9 @@ async def fetch_all_source_candidates(
                 q,
                 page=1,
                 n=candidate_n,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
             )
 
             for p in papers or []:

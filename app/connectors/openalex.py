@@ -119,16 +119,18 @@ def _journal_name(work: dict) -> str:
     return ((work.get("host_venue") or {}).get("display_name") or "").strip()
 
 
-def _build_filter(year_min: Optional[int], year_max: Optional[int]) -> Optional[str]:
-    """
-    Year range uses from_publication_date/to_publication_date inside `filter=...`
-    :contentReference[oaicite:3]{index=3}
-    """
+def _build_filter(
+    year_min: Optional[int],
+    year_max: Optional[int],
+    has_abstract: bool = False,
+) -> Optional[str]:
     parts: list[str] = []
     if year_min is not None:
         parts.append(f"from_publication_date:{int(year_min)}-01-01")
     if year_max is not None:
         parts.append(f"to_publication_date:{int(year_max)}-12-31")
+    if has_abstract:
+        parts.append("has_abstract:true")
     return ",".join(parts) if parts else None
 
 
@@ -140,6 +142,7 @@ def openalex_search(
     sort: str = "relevance",
     year_min: Optional[int] = None,
     year_max: Optional[int] = None,
+    has_abstract: bool = False,
 ) -> Tuple[List[Paper], int]:
     q = (q or "").strip()
     page = max(1, int(page))
@@ -158,7 +161,12 @@ def openalex_search(
     if sort_param:
         params["sort"] = sort_param
 
-    filt = _build_filter(year_min, year_max)
+    filt = _build_filter(
+        year_min,
+        year_max,
+        has_abstract=has_abstract,
+    )
+
     if filt:
         params["filter"] = filt
 

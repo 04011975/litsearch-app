@@ -53,6 +53,95 @@ def test_export_pubmed_ris_page(client):
     assert "ER  -" in text
 
 
+def test_export_openalex_page_passes_abstract_filter(client, monkeypatch):
+    calls = []
+
+    def fake_openalex_search(*args, **kwargs):
+        calls.append(kwargs)
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "scope": "page",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["has_abstract"] is True
+
+
+def test_export_openalex_page_abstract_filter_changes_cache_key(
+    client,
+    monkeypatch,
+):
+    cache_payloads = []
+
+    def fake_make_cache_key(prefix, payload):
+        if prefix == "export:openalex:page":
+            cache_payloads.append(dict(payload))
+        return f"{prefix}:test"
+
+    def fake_openalex_search(*args, **kwargs):
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.make_cache_key",
+        fake_make_cache_key,
+    )
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "scope": "page",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 0,
+        },
+    )
+
+    assert r.status_code == 200
+
+    payloads_without_abstract_filter = list(cache_payloads)
+    cache_payloads.clear()
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "scope": "page",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    payloads_with_abstract_filter = list(cache_payloads)
+
+    assert payloads_without_abstract_filter != payloads_with_abstract_filter
+
 @pytest.mark.integration
 def test_export_openalex_csv_page(client):
     r = client.get(
@@ -75,6 +164,94 @@ def test_export_openalex_csv_page(client):
     assert len(text.splitlines()) >= 2
 
 
+def test_export_openalex_bulk_passes_abstract_filter(client, monkeypatch):
+    calls = []
+
+    def fake_openalex_search(*args, **kwargs):
+        calls.append(kwargs)
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "scope": "bulk",
+            "bulk_limit": 20,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["has_abstract"] is True
+
+
+def test_export_openalex_bulk_abstract_filter_changes_cache_key(
+    client,
+    monkeypatch,
+):
+    cache_payloads = []
+
+    def fake_make_cache_key(prefix, payload):
+        if prefix == "export:openalex:bulk":
+            cache_payloads.append(dict(payload))
+        return f"{prefix}:test"
+
+    def fake_openalex_search(*args, **kwargs):
+        return ([], 0)
+
+    monkeypatch.setattr(
+        "app.main.make_cache_key",
+        fake_make_cache_key,
+    )
+    monkeypatch.setattr(
+        "app.main.openalex_search",
+        fake_openalex_search,
+    )
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "scope": "bulk",
+            "bulk_limit": 20,
+            "sort": "relevance",
+            "has_abstract": 0,
+        },
+    )
+
+    assert r.status_code == 200
+    payloads_without_abstract_filter = list(cache_payloads)
+
+    cache_payloads.clear()
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "scope": "bulk",
+            "bulk_limit": 20,
+            "sort": "relevance",
+            "has_abstract": 1,
+        },
+    )
+
+    assert r.status_code == 200
+    payloads_with_abstract_filter = list(cache_payloads)
+
+    assert payloads_without_abstract_filter != payloads_with_abstract_filter
+
+
+@pytest.mark.integration
 def test_export_epmc_csv_page(client):
     r = client.get(
         "/export/csv",
