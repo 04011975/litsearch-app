@@ -851,6 +851,7 @@ async def _europe_pmc_search_compat_async(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> Tuple[List[Paper], int, Optional[str]]:
     return await _run_sync(
         europe_pmc_search,
@@ -862,6 +863,7 @@ async def _europe_pmc_search_compat_async(
         year_max=year_max,
         has_abstract=has_abstract,
         mesh=mesh,
+        mesh_mode=mesh_mode,
     )
 
 
@@ -893,6 +895,7 @@ def _epmc_cache_key_filtered(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
     return epmc_cache_key(
         q,
@@ -902,6 +905,7 @@ def _epmc_cache_key_filtered(
         year_max=year_max,
         has_abstract=has_abstract,
         mesh=mesh,
+        mesh_mode=mesh_mode,
     )
 
 
@@ -914,6 +918,7 @@ def _epmc_build_key_filtered(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
     return epmc_build_key(
         q,
@@ -923,6 +928,7 @@ def _epmc_build_key_filtered(
         year_max=year_max,
         has_abstract=has_abstract,
         mesh=mesh,
+        mesh_mode=mesh_mode,
     )
 
 
@@ -936,6 +942,7 @@ def _epmc_get_cursor_for_chunk(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> Optional[str]:
     if not _redis:
         return None
@@ -948,6 +955,7 @@ def _epmc_get_cursor_for_chunk(
             year_max=year_max,
             has_abstract=has_abstract,
             mesh=mesh,
+            mesh_mode=mesh_mode,
         )
         return _redis.hget(key, str(int(chunk)))
     except Exception:
@@ -965,6 +973,7 @@ def _epmc_set_cursor_for_chunk(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> None:
     if not _redis:
         return
@@ -977,6 +986,7 @@ def _epmc_set_cursor_for_chunk(
             year_max=year_max,
             has_abstract=has_abstract,
             mesh=mesh,
+            mesh_mode=mesh_mode,
         )
         pipe = _redis.pipeline()
         pipe.hset(key, str(int(chunk)), cursor)
@@ -1083,6 +1093,7 @@ async def _epmc_enqueue_build(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> None:
     if not ARQ_REDIS:
         return
@@ -1102,6 +1113,7 @@ async def _epmc_enqueue_build(
         year_max=year_max,
         has_abstract=has_abstract,
         mesh=mesh,
+        mesh_mode=mesh_mode,
     )
     now = int(time.time())
 
@@ -1134,6 +1146,7 @@ async def _epmc_enqueue_build(
         year_max=year_max,
         has_abstract=has_abstract,
         mesh=mesh,
+        mesh_mode=mesh_mode,
     ).split(":")[-1]
 
     await ARQ_REDIS.enqueue_job(
@@ -1146,6 +1159,7 @@ async def _epmc_enqueue_build(
         year_max=year_max,
         has_abstract=int(has_abstract or 0),
         mesh=_normalize_mesh(mesh or ""),
+        mesh_mode=mesh_mode,
         _job_id=f"epmc-build:{job_hash}:chunk{new_target}",
     )
 
@@ -1167,6 +1181,7 @@ def _template_base_context(
     year_max: str,
     has_abstract: int,
     mesh: str,
+    mesh_mode: str = "or",
 ) -> dict[str, Any]:
     return {
         "request": request,
@@ -1179,6 +1194,9 @@ def _template_base_context(
         "supports_abstract_filter": get_search_mode_capabilities(
             source
         ).supports_abstract_filter,
+        "supports_mesh_filter": get_search_mode_capabilities(
+            source
+        ).supports_mesh_filter,
         "supports_page_jump": get_search_mode_capabilities(source).supports_page_jump,
         "supports_last": get_search_mode_capabilities(source).supports_last,
         "supports_previous": get_search_mode_capabilities(source).supports_previous,
@@ -1186,6 +1204,7 @@ def _template_base_context(
         "year_max": year_max,
         "has_abstract": has_abstract,
         "mesh": mesh,
+        "mesh_mode": mesh_mode,
         "mesh_list": _mesh_list(mesh),
         "concept_suggestions": [],
         "bulk_limit": BULK_EXPORT_LIMIT,
@@ -1392,7 +1411,7 @@ async def search(
             year_max=year_max_i,
             has_abstract=has_abstract,
             mesh=mesh,
-            mesh_mode="or",
+            mesh_mode=mesh_mode,
             redis=getattr(request.app.state, "redis", None),
             snapshot_id=(snapshot_id or "").strip() or None,
         )
@@ -1434,6 +1453,7 @@ async def search(
             "has_abstract": has_abstract,
             "mesh": mesh,
             "snapshot_id": snapshot_id,
+            "mesh_mode": mesh_mode,
         }
 
         previous_url = (
@@ -1501,6 +1521,7 @@ async def search(
                 year_max=year_max,
                 has_abstract=has_abstract,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
@@ -1555,6 +1576,7 @@ async def search(
                 year_max=year_max_i,
                 has_abstract=has_abs_i,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             if cursor_ready:
@@ -1572,6 +1594,7 @@ async def search(
                             "year_max": year_max,
                             "has_abstract": has_abstract,
                             "mesh": mesh,
+                            "mesh_mode": mesh_mode,
                         },
                     )
                 )
@@ -1588,6 +1611,7 @@ async def search(
                     year_max=year_max,
                     has_abstract=has_abstract,
                     mesh=mesh,
+                    mesh_mode=mesh_mode,
                 )
 
                 ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
@@ -1616,6 +1640,7 @@ async def search(
                 year_max=year_max_i,
                 has_abstract=has_abs_i,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             cursor_ready = _epmc_get_cursor_for_chunk(
@@ -1627,6 +1652,7 @@ async def search(
                 year_max=year_max_i,
                 has_abstract=has_abs_i,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             if cursor_ready:
@@ -1644,6 +1670,7 @@ async def search(
                             "year_max": year_max,
                             "has_abstract": has_abstract,
                             "mesh": mesh,
+                            "mesh_mode": mesh_mode,
                         },
                     )
                 )
@@ -1656,6 +1683,7 @@ async def search(
                 year_max=year_max_i,
                 has_abstract=has_abs_i,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
             meta_raw = await ARQ_REDIS.hgetall(bk)
             meta = {_as_str(k): _as_str(v) for k, v in (meta_raw or {}).items()}
@@ -1673,6 +1701,7 @@ async def search(
                 year_max=year_max,
                 has_abstract=has_abstract,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
@@ -1720,6 +1749,7 @@ async def search(
                     year_max=year_max_i,
                     has_abstract=has_abs_i,
                     mesh=mesh,
+                    mesh_mode=mesh_mode,
                 )
             except EuropePmcTemporaryError as exc:
                 logger.warning(
@@ -1754,6 +1784,7 @@ async def search(
             year_max=year_max_i,
             has_abstract=has_abs_i,
             mesh=mesh,
+            mesh_mode=mesh_mode,
         )
         if next_cursor:
             _epmc_set_cursor_for_chunk(
@@ -1766,6 +1797,7 @@ async def search(
                 year_max=year_max_i,
                 has_abstract=has_abs_i,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
         ep_papers = (collected or [])[in_chunk_offset : in_chunk_offset + int(n)]
@@ -1810,6 +1842,7 @@ async def search(
                     year_max=year_max_i,
                     has_abstract=has_abs_i,
                     mesh=mesh,
+                    mesh_mode=mesh_mode,
                 )
 
             if previous_cursor:
@@ -1826,6 +1859,7 @@ async def search(
                         "year_max": year_max,
                         "has_abstract": has_abstract,
                         "mesh": mesh,
+                        "mesh_mode": mesh_mode,
                     },
                 )
 
@@ -1847,6 +1881,7 @@ async def search(
                         "year_max": year_max,
                         "has_abstract": has_abstract,
                         "mesh": mesh,
+                        "mesh_mode": mesh_mode,
                     },
                 )
             elif next_cursor:
@@ -1863,6 +1898,7 @@ async def search(
                         "year_max": year_max,
                         "has_abstract": has_abstract,
                         "mesh": mesh,
+                        "mesh_mode": mesh_mode,
                     },
                 )
 
@@ -1879,6 +1915,7 @@ async def search(
                     "year_max": year_max,
                     "has_abstract": has_abstract,
                     "mesh": mesh,
+                    "mesh_mode": mesh_mode,
                 },
             )
             if total_pages > 1
@@ -1899,6 +1936,7 @@ async def search(
                 "year_max": year_max,
                 "has_abstract": has_abstract,
                 "mesh": mesh,
+                "mesh_mode": mesh_mode,
             },
         )
         epmc_export_url_ris = _build_url(
@@ -1915,6 +1953,7 @@ async def search(
                 "year_max": year_max,
                 "has_abstract": has_abstract,
                 "mesh": mesh,
+                "mesh_mode": mesh_mode,
             },
         )
 
@@ -1929,6 +1968,7 @@ async def search(
             year_max=year_max,
             has_abstract=has_abstract,
             mesh=mesh,
+            mesh_mode=mesh_mode,
         )
 
         ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
@@ -3405,6 +3445,8 @@ async def export(
                     "year_min": year_min,
                     "year_max": year_max,
                     "has_abstract": has_abstract,
+                    "mesh": mesh,
+                    "mesh_mode": mesh_mode,
                 },
             )
             cached = await cache_get_json(redis, cache_key) if redis else None
@@ -3425,6 +3467,7 @@ async def export(
                         year_max=_safe_int(year_max, None),
                         has_abstract=has_abstract,
                         mesh=mesh,
+                        mesh_mode=mesh_mode,
                     )
                     if not batch:
                         break
@@ -3466,6 +3509,7 @@ async def export(
                     year_max=_safe_int(year_max, None),
                     has_abstract=has_abstract,
                     mesh=mesh,
+                    mesh_mode=mesh_mode,
                 )
                 if not nxt:
                     cur = None
@@ -3488,6 +3532,7 @@ async def export(
                 year_max=_safe_int(year_max, None),
                 has_abstract=has_abstract,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
             papers = ep_papers or []
 

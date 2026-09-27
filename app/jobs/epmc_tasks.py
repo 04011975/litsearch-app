@@ -73,12 +73,14 @@ def _epmc_filters_key(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
     ymn = "" if year_min is None else str(int(year_min))
     ymx = "" if year_max is None else str(int(year_max))
     ha = "1" if int(has_abstract or 0) else "0"
     m = _normalize_mesh(mesh or "")
-    return f"ymin={ymn}:ymax={ymx}:abs={ha}:mesh={m}"
+    mm = "and" if (mesh_mode or "").strip().lower() == "and" else "or"
+    return f"ymin={ymn}:ymax={ymx}:abs={ha}:mesh={m}:mesh_mode={mm}"
 
 
 def epmc_cache_key(
@@ -90,11 +92,20 @@ def epmc_cache_key(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
     """
     FILTER-AWARE cache key. Prevents cursor collisions between different year/abstract/mesh filters.
     """
-    fkey = _epmc_filters_key(year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh)
+
+    fkey = _epmc_filters_key(
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
+        mesh_mode=mesh_mode,
+    )
+
     h = hashlib.sha1(f"{q}::{n}::{sort}::{fkey}".encode("utf-8")).hexdigest()[:16]
     return f"epmc:cursor:{h}"
 
@@ -108,8 +119,17 @@ def epmc_build_key(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
-    fkey = _epmc_filters_key(year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh)
+
+    fkey = _epmc_filters_key(
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
+        mesh_mode=mesh_mode,
+    )
+
     h = hashlib.sha1(f"{q}::{n}::{sort}::{fkey}".encode("utf-8")).hexdigest()[:16]
     return f"epmc:build:{h}"
 
@@ -123,8 +143,16 @@ def _epmc_lock_key(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
-    fkey = _epmc_filters_key(year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh)
+    fkey = _epmc_filters_key(
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
+        mesh_mode=mesh_mode,
+    )
+
     h = hashlib.sha1(f"{q}::{n}::{sort}::{fkey}".encode("utf-8")).hexdigest()[:16]
     return f"epmc:lock:{h}"
 
@@ -143,6 +171,7 @@ def _build_epmc_query(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
     """
     Compose a Europe PMC query string including filters.
@@ -182,7 +211,13 @@ def _build_epmc_query(
         terms = [t for t in mesh_norm.split("|") if t.strip()]
         if terms:
             # quote terms; Europe PMC query accepts MESH:"...".
-            mesh_q = " OR ".join([f'MESH:"{t}"' for t in terms])
+
+            mesh_operator = (
+                " AND "
+                if (mesh_mode or "").strip().lower() == "and"
+                else " OR "
+            )
+            mesh_q = mesh_operator.join([f'MESH:"{t}"' for t in terms])
             parts.append(f"({mesh_q})")
 
     return " AND ".join(parts)
@@ -198,13 +233,27 @@ async def _call_epmc(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> tuple:
     """
     europe_pmc_search is blocking (requests) → thread
     """
-    qq = _build_epmc_query(q, year_min=year_min, year_max=year_max, has_abstract=has_abstract, mesh=mesh)
-    return await asyncio.to_thread(europe_pmc_search, qq, n=n, cursor=cursor, sort=sort)
+    qq = _build_epmc_query(
+        q,
+        year_min=year_min,
+        year_max=year_max,
+        has_abstract=has_abstract,
+        mesh=mesh,
+        mesh_mode=mesh_mode,
+    )
 
+    return await asyncio.to_thread(
+        europe_pmc_search,
+        qq,
+        n=n,
+        cursor=cursor,
+        sort=sort,
+    )
 
 async def build_epmc_cursors(
     ctx: dict,
@@ -221,6 +270,7 @@ async def build_epmc_cursors(
     year_max: Optional[int] = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> dict:
     """
     Chunk-based cursor chain builder (FILTER-AWARE).
@@ -273,6 +323,7 @@ async def build_epmc_cursors(
         year_max=year_max_i,
         has_abstract=has_abstract_i,
         mesh=mesh_norm,
+        mesh_mode=mesh_mode,
     )
     ck = epmc_cache_key(
         q,
@@ -282,6 +333,7 @@ async def build_epmc_cursors(
         year_max=year_max_i,
         has_abstract=has_abstract_i,
         mesh=mesh_norm,
+        mesh_mode=mesh_mode,
     )
     lk = _epmc_lock_key(
         q,
@@ -291,6 +343,7 @@ async def build_epmc_cursors(
         year_max=year_max_i,
         has_abstract=has_abstract_i,
         mesh=mesh_norm,
+        mesh_mode=mesh_mode,
     )
 
     now = int(time.time())
@@ -389,6 +442,7 @@ async def build_epmc_cursors(
                     year_max=year_max_i,
                     has_abstract=has_abstract_i,
                     mesh=mesh_norm,
+                    mesh_mode=mesh_mode,
                 )
                 if not next_cursor:
                     await r.hset(
@@ -420,6 +474,7 @@ async def build_epmc_cursors(
                     year_max=year_max_i,
                     has_abstract=has_abstract_i,
                     mesh=mesh_norm,
+                    mesh_mode=mesh_mode,
                 )
                 if not next_cursor:
                     await r.hset(

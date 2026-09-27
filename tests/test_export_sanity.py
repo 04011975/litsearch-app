@@ -251,6 +251,67 @@ def test_export_openalex_bulk_abstract_filter_changes_cache_key(
     assert payloads_without_abstract_filter != payloads_with_abstract_filter
 
 
+def test_export_epmc_bulk_mesh_mode_changes_cache_key(
+    client,
+    monkeypatch,
+):
+    cache_payloads = []
+
+    def fake_make_cache_key(prefix, payload):
+        if prefix == "export:epmc:bulk":
+            cache_payloads.append(dict(payload))
+        return f"{prefix}:test"
+
+    async def fake_europe_pmc_search(*args, **kwargs):
+        return [], 0, None
+
+    monkeypatch.setattr(
+        "app.main.make_cache_key",
+        fake_make_cache_key,
+    )
+    monkeypatch.setattr(
+        "app.main._europe_pmc_search_compat_async",
+        fake_europe_pmc_search,
+    )
+
+    common_params = {
+        "q": "cancer",
+        "source": "europe_pmc",
+        "scope": "bulk",
+        "bulk_limit": 20,
+        "sort": "relevance",
+        "mesh": "Humans|Adolescent",
+    }
+
+    r = client.get(
+        "/export/csv",
+        params={
+            **common_params,
+            "mesh_mode": "or",
+        },
+    )
+
+    assert r.status_code == 200
+    payloads_or = list(cache_payloads)
+
+    cache_payloads.clear()
+
+    r = client.get(
+        "/export/csv",
+        params={
+            **common_params,
+            "mesh_mode": "and",
+        },
+    )
+
+    assert r.status_code == 200
+    payloads_and = list(cache_payloads)
+
+    assert payloads_or
+    assert payloads_and
+    assert payloads_or != payloads_and
+
+
 @pytest.mark.integration
 def test_export_epmc_csv_page(client):
     r = client.get(

@@ -108,6 +108,7 @@ def _build_epmc_query(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
 ) -> str:
     q = (q or "").strip()
     if not q:
@@ -141,7 +142,9 @@ def _build_epmc_query(
     if mesh_norm:
         mesh_terms = [t for t in mesh_norm.split("|") if t.strip()]
         if mesh_terms:
-            mesh_q = " OR ".join([f'MESH:"{term}"' for term in mesh_terms])
+            mesh_operator = " AND " if (mesh_mode or "").strip().lower() == "and" else " OR "
+            mesh_q = mesh_operator.join([f'MESH:"{term}"' for term in mesh_terms])
+
             parts.append(f"({mesh_q})")
 
     return " AND ".join(parts)
@@ -193,6 +196,7 @@ def europe_pmc_search(
     year_max: int | None = None,
     has_abstract: int = 0,
     mesh: str = "",
+    mesh_mode: str = "or",
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     retries: int = 2,
 ) -> tuple[list[Paper], int, Optional[str]]:
@@ -206,6 +210,7 @@ def europe_pmc_search(
         year_max=year_max,
         has_abstract=has_abstract,
         mesh=mesh,
+        mesh_mode=mesh_mode,
     )
     if not epmc_query:
         return [], 0, None

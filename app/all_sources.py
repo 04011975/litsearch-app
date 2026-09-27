@@ -401,6 +401,7 @@ async def fetch_all_source_candidates(
                 year_max=year_max,
                 has_abstract=has_abstract,
                 mesh=mesh,
+                mesh_mode=mesh_mode,
             )
 
             for p in papers or []:
