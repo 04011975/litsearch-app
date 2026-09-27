@@ -169,7 +169,7 @@
     </select>
   {% endif %}
 
-  {% if current_source == "pubmed" %}
+  {% if supports_mesh_filter %}
     <input
       id="mesh_input"
       name="mesh"
@@ -190,7 +190,7 @@
   >Search</button>
 
   <a
-    href="/search?source={{ current_source|urlencode }}&q=&page=1&n={{ n }}&sort=relevance&year_min=&year_max=&has_abstract=0{% if current_source == 'pubmed' %}&mesh=&mesh_mode=or{% endif %}"
+    href="/search?source={{ current_source|urlencode }}&q=&page=1&n={{ n }}&sort=relevance&year_min=&year_max=&has_abstract=0{% if supports_mesh_filter %}&mesh=&mesh_mode=or{% endif %}"
     class="btn-secondary"
     style="margin-left: 0.5rem;"
   >
@@ -403,7 +403,7 @@
 
     <input type="hidden" name="has_abstract" value="{{ has_abstract }}">
 
-    {% if current_source == "pubmed" %}
+    {% if supports_mesh_filter %}
       <input type="hidden" name="mesh" value="{{ mesh }}">
       <input type="hidden" name="mesh_mode" value="{{ mesh_mode or 'or' }}">
     {% endif %}
@@ -536,7 +536,7 @@
     params.set("year_max", "{{ year_max }}");
     params.set("has_abstract", "{{ has_abstract }}");
 
-    {% if current_source == "pubmed" %}
+    {% if supports_mesh_filter %}
     params.set("mesh", "{{ mesh }}");
     params.set("mesh_mode", "{{ mesh_mode or 'or' }}");
     {% endif %}

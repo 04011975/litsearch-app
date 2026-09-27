@@ -107,6 +107,12 @@ def test_europe_pmc_filter_capabilities():
     assert capabilities.supports_mesh_filter is True
 
 
+def test_all_sources_does_not_expose_partial_mesh_filter():
+    capabilities = get_search_mode_capabilities("all")
+
+    assert capabilities.supports_mesh_filter is False
+
+
 def test_semantic_scholar_relevance_supports_local_filters():
     capabilities = get_search_mode_capabilities(
         "semantic_scholar",

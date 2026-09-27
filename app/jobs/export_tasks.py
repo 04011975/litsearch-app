@@ -981,6 +981,11 @@ async def _fetch_europe_pmc_export_records(
     year_max_i = _meta_int(meta, "year_max")
     has_abstract_i = int((meta.get("has_abstract") or "0").strip() or "0")
 
+    mesh = _as_str(meta.get("mesh"))
+    mesh_mode = _as_str(meta.get("mesh_mode") or "or").strip().lower()
+    if mesh_mode not in {"and", "or"}:
+        mesh_mode = "or"
+
     cursor: Optional[str] = "*"
     seen_ids: set[str] = set()
 
@@ -1012,6 +1017,8 @@ async def _fetch_europe_pmc_export_records(
                 "year_min": year_min_i,
                 "year_max": year_max_i,
                 "has_abstract": has_abstract_i,
+                "mesh": mesh,
+                "mesh_mode": mesh_mode,
                 "cursor": cursor,
                 "n": want,
             },
@@ -1076,6 +1083,8 @@ async def _fetch_europe_pmc_export_records(
                 year_min=year_min_i,
                 year_max=year_max_i,
                 has_abstract=has_abstract_i,
+                mesh=mesh,
+                mesh_mode=mesh_mode,
             )
             batch = batch or []
             batch = normalize_papers(batch, source="europe_pmc")
