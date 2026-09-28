@@ -1676,6 +1676,26 @@ def test_doaj_only_offers_relevance_sort(client, monkeypatch):
     assert '<select name="has_abstract">' in r.text
 
 
+def test_doaj_unsupported_sort_falls_back_to_relevance(client, monkeypatch):
+    def fake_doaj_search(*args, **kwargs):
+        return [], 0
+
+    monkeypatch.setattr("app.main.doaj_search", fake_doaj_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "doaj",
+            "n": 5,
+            "sort": "date_desc",
+        },
+    )
+
+    assert r.status_code == 200
+    assert '<option value="relevance" selected>' in r.text
+
+
 def test_doaj_export_limit_stops_at_1000(client, monkeypatch):
     def fake_doaj_search(*args, **kwargs):
         return (

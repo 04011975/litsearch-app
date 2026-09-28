@@ -1378,7 +1378,7 @@ async def search(
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
 
-    if source in {"europe_pmc", "pubmed"}:
+    if source in {"europe_pmc", "pubmed", "doaj"}:
         capabilities = get_search_mode_capabilities(source)
 
         if ui_sort not in capabilities.supported_sorts:
@@ -1389,6 +1389,8 @@ async def search(
                     "PubMed API currently supports newest-first publication date sorting, "
                     "but not oldest-first sorting in this integration."
                 )
+            elif source == "doaj":
+                warning = "DOAJ currently supports relevance sorting only."
 
             ui_sort = "relevance"
 
