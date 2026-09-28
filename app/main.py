@@ -3187,8 +3187,11 @@ async def export(
     has_abstract = export_params.has_abstract
     mesh_mode = export_params.mesh_mode
 
-    if source == "europe_pmc" and ui_sort != "relevance":
-        ui_sort = "relevance"
+    if source in {"europe_pmc", "pubmed"}:
+        capabilities = get_search_mode_capabilities(source)
+
+        if ui_sort not in capabilities.supported_sorts:
+            ui_sort = "relevance"
 
     pubmed_sort = all_sources_pubmed_sort(ui_sort)
     openalex_sort = all_sources_openalex_sort(ui_sort)
