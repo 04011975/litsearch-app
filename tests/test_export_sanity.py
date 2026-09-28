@@ -541,6 +541,40 @@ def test_export_pubmed_mesh_mode_preserved_with_mock(client, monkeypatch):
     assert "Mock PubMed Paper" in r.text
 
 
+def test_export_pubmed_unsupported_date_asc_falls_back_to_relevance(
+    client, monkeypatch
+):
+    received_sorts = []
+
+    async def fake_pubmed_search_page(*args, **kwargs):
+        received_sorts.append(kwargs.get("sort"))
+
+        class FakeRes:
+            pmids = []
+            count = 0
+            webenv = "fake"
+            query_key = "1"
+
+        return FakeRes()
+
+    monkeypatch.setattr("app.main.pubmed_search_page", fake_pubmed_search_page)
+
+    r = client.get(
+        "/export/csv",
+        params={
+            "q": "cancer",
+            "source": "pubmed",
+            "scope": "page",
+            "page": 1,
+            "n": 5,
+            "sort": "date_asc",
+        },
+    )
+
+    assert r.status_code == 200
+    assert received_sorts == ["relevance"]
+
+
 def test_export_rejects_empty_query(client):
     r = client.get(
         "/export/csv",
