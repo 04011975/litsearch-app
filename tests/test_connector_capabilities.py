@@ -113,13 +113,13 @@ def test_all_sources_does_not_expose_partial_mesh_filter():
     assert capabilities.supports_mesh_filter is False
 
 
-def test_semantic_scholar_relevance_supports_local_filters():
+def test_semantic_scholar_relevance_filter_capabilities():
     capabilities = get_search_mode_capabilities(
         "semantic_scholar",
         "relevance",
     )
 
-    assert capabilities.supports_year_filter is True
+    assert capabilities.supports_year_filter is False
     assert capabilities.supports_abstract_filter is True
 
 

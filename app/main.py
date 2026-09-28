@@ -1182,7 +1182,10 @@ def _template_base_context(
     has_abstract: int,
     mesh: str,
     mesh_mode: str = "or",
+    mode: str | None = None,
 ) -> dict[str, Any]:
+    capabilities = get_search_mode_capabilities(source, mode)
+
     return {
         "request": request,
         "q": q,
@@ -1191,15 +1194,12 @@ def _template_base_context(
         "page": page,
         "sort": sort,  # UI sort token (relevance/date_desc/date_asc)
         "supported_sorts": get_search_source_supported_sorts(source),
-        "supports_abstract_filter": get_search_mode_capabilities(
-            source
-        ).supports_abstract_filter,
-        "supports_mesh_filter": get_search_mode_capabilities(
-            source
-        ).supports_mesh_filter,
-        "supports_page_jump": get_search_mode_capabilities(source).supports_page_jump,
-        "supports_last": get_search_mode_capabilities(source).supports_last,
-        "supports_previous": get_search_mode_capabilities(source).supports_previous,
+        "supports_year_filter": capabilities.supports_year_filter,
+        "supports_abstract_filter": capabilities.supports_abstract_filter,
+        "supports_mesh_filter": capabilities.supports_mesh_filter,
+        "supports_page_jump": capabilities.supports_page_jump,
+        "supports_last": capabilities.supports_last,
+        "supports_previous": capabilities.supports_previous,
         "year_min": year_min,
         "year_max": year_max,
         "has_abstract": has_abstract,
@@ -2623,6 +2623,7 @@ async def search(
                 year_max=year_max,
                 has_abstract=has_abstract,
                 mesh=mesh,
+                mode=ss_mode,
             )
 
             ctx.update(
@@ -2762,6 +2763,7 @@ async def search(
             year_max=year_max,
             has_abstract=has_abstract,
             mesh=mesh,
+            mode=ss_mode,
         )
 
         ctx.update(

@@ -51,6 +51,41 @@ def test_template_context_exposes_previous_capability(client):
     assert context["supports_previous"] is True
 
 
+def test_template_context_exposes_semantic_scholar_mode_year_capability(client):
+    request = client.get("/search").request
+
+    relevance_context = _template_base_context(
+        request,
+        q="glioblastoma",
+        source="semantic_scholar",
+        n=5,
+        page=1,
+        sort="relevance",
+        year_min="",
+        year_max="",
+        has_abstract=0,
+        mesh="",
+        mode="relevance",
+    )
+
+    bulk_context = _template_base_context(
+        request,
+        q="glioblastoma",
+        source="semantic_scholar",
+        n=5,
+        page=1,
+        sort="date_desc",
+        year_min="2020",
+        year_max="2025",
+        has_abstract=0,
+        mesh="",
+        mode="bulk",
+    )
+
+    assert relevance_context["supports_year_filter"] is False
+    assert bulk_context["supports_year_filter"] is True
+
+
 def test_template_context_exposes_europe_pmc_mesh_capability(client):
     request = client.get("/search").request
 
@@ -1388,6 +1423,86 @@ def test_semantic_scholar_relevance_previous_navigation(client, monkeypatch):
         in r.text
     )
     assert "page=1" in r.text
+
+
+def test_semantic_scholar_relevance_disables_year_filter(client, monkeypatch):
+    def fake_semantic_scholar_search(*args, **kwargs):
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.main.search_semantic_scholar",
+        fake_semantic_scholar_search,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "semantic_scholar",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+
+    year_min_input = re.search(
+        r'<input\s+name="year_min".*?>',
+        r.text,
+        re.DOTALL,
+    )
+    year_max_input = re.search(
+        r'<input\s+name="year_max".*?>',
+        r.text,
+        re.DOTALL,
+    )
+
+    assert year_min_input is not None
+    assert year_max_input is not None
+    assert "disabled" in year_min_input.group(0)
+    assert "disabled" in year_max_input.group(0)
+
+
+def test_semantic_scholar_bulk_enables_year_filter(client, monkeypatch):
+    def fake_semantic_scholar_bulk(*args, **kwargs):
+        return [], 0, None
+
+    monkeypatch.setattr(
+        "app.main.search_semantic_scholar_bulk",
+        fake_semantic_scholar_bulk,
+    )
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "glioblastoma",
+            "source": "semantic_scholar",
+            "page": 1,
+            "n": 5,
+            "sort": "date_desc",
+            "year_min": "2020",
+            "year_max": "2025",
+        },
+    )
+
+    assert r.status_code == 200
+
+    year_min_input = re.search(
+        r'<input\s+name="year_min".*?>',
+        r.text,
+        re.DOTALL,
+    )
+    year_max_input = re.search(
+        r'<input\s+name="year_max".*?>',
+        r.text,
+        re.DOTALL,
+    )
+
+    assert year_min_input is not None
+    assert year_max_input is not None
+    assert "disabled" not in year_min_input.group(0)
+    assert "disabled" not in year_max_input.group(0)
 
 
 def test_semantic_scholar_bulk_previous_navigation_uses_cached_token(
