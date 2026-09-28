@@ -145,9 +145,9 @@
     value="{{ year_min }}"
     placeholder="Year (from)"
     size="10"
-    {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
+    {% if not supports_year_filter %}
       disabled
-      title="Year filtering is only available in Semantic Scholar chronological mode."
+      title="Year filtering is not available in this search mode."
     {% endif %}
   />
 
@@ -156,9 +156,9 @@
     value="{{ year_max }}"
     placeholder="Year (to)"
     size="10"
-    {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
+    {% if not supports_year_filter %}
       disabled
-      title="Year filtering is only available in Semantic Scholar chronological mode."
+      title="Year filtering is not available in this search mode."
     {% endif %}
   />
 
@@ -389,10 +389,7 @@
       <input type="hidden" name="snapshot_id" value="{{ snapshot_id }}">
     {% endif %}
 
-    {% if current_source == "semantic_scholar" and not ss_bulk_mode %}
-      <input type="hidden" name="year_min" value="">
-      <input type="hidden" name="year_max" value="">
-    {% else %}
+    {% if supports_year_filter %}
       <input type="hidden" name="year_min" value="{{ year_min }}">
       <input type="hidden" name="year_max" value="{{ year_max }}">
     {% endif %}
