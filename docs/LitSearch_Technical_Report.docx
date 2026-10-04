@@ -1,0 +1,825 @@
+LitSearch: A Technical Report on a Reproducible Multi-Source Literature Search Platform
+
+Document type:
+Technical Report
+
+Author / Organization:
+BibQPrompt
+https://bibqprompt.com
+
+Description:
+This technical report documents the design, implementation, architecture, and methodological foundations of LitSearch, a web-based platform for reproducible and transparent literature retrieval across multiple scientific literature databases using programmatic access to external scholarly APIs.
+
+LitSearch supports structured querying, source-aware retrieval, multi-source aggregation, cross-source deduplication and metadata merging, deterministic query construction, temporary snapshot-based federated pagination, metadata enrichment, asynchronous export workflows, and reproducible literature-search documentation.
+
+Version:
+1.3
+
+Implementation state:
+October 2026 development state
+
+Status:
+Public Technical Documentation
+
+Software release note:
+This report describes functionality implemented in the current LitSearch development line. The v0.6.0 development line remains subject to its own release-level validation and release process. The technical-report version and the software-release version therefore do not need to correspond one-to-one.
+
+________________________________________
+Abstract
+Systematic, semi-systematic, and exploratory literature searches are fundamental components of scientific research. However, many literature searches are still performed through graphical database interfaces, which can limit transparency, procedural reproducibility, and precise documentation of retrieval strategies. LitSearch addresses these limitations by formalizing literature retrieval as an explicit computational workflow.
+The current implementation integrates six primary retrieval sources: PubMed, Europe PMC, OpenAlex, Semantic Scholar, Crossref, and DOAJ. Source-specific connectors translate shared LitSearch search parameters into the query syntax, filtering mechanisms, sorting behavior, pagination strategy, and metadata structures supported by each upstream service. A centralized capability registry describes which operations are supported by each source and, where necessary, by individual retrieval modes.
+LitSearch supports free-text retrieval, publication-year filtering, abstract-availability filtering, sorting, pagination, and controlled-vocabulary refinement where supported. PubMed and Europe PMC support Medical Subject Headings (MeSH) filtering with explicit AND and OR combination semantics. Other sources retain their own retrieval semantics rather than being presented as supporting equivalent MeSH functionality.
+The multi-source workflow ("All Sources") retrieves bounded candidate sets from PubMed, OpenAlex, Crossref, DOAJ, Europe PMC, and Semantic Scholar. Candidate records are normalized into a canonical Paper model and processed through centralized cross-source deduplication. Persistent identifiers are prioritized where available, including DOI, PMID, and PMCID. Normalized title, first-author, and publication-year metadata provide additional matching mechanisms subject to identifier-conflict safeguards. Matched records can contribute complementary metadata while retaining retrieval-source provenance.
+All Sources does not compute a universal cross-database relevance score. Relevance-oriented results are presented through deterministic source-balanced interleaving, while chronological modes are ordered centrally using normalized publication metadata. Processed federated result states can be stored temporarily as Redis-backed snapshots so subsequent pages are sliced from the same bounded, deduplicated, ordered candidate set during the snapshot lifetime.
+The application is implemented using FastAPI, Jinja2, Redis, ARQ, Docker, and source-specific connector modules. Redis supports temporary operational state, including pagination-related state, All Sources snapshots, and background-job coordination. ARQ workers support asynchronous export workflows. Standard exports are available in CSV, RIS, and XLSX formats.
+The canonical Paper model additionally supports metadata enrichment as a separate stage from retrieval. In the current detail workflow, PubMed-derived MeSH metadata and OpenCitations citation and reference counts can augment applicable records. Enrichment providers do not contribute new publications to search result sets, and provider provenance is retained for fields changed through enrichment.
+Validation combines automated regression tests, capability tests, connector and workflow tests, Docker-dependent integration tests where applicable, export validation, and manual or live-source sanity checks. Because LitSearch depends on externally maintained scholarly APIs, reproducibility refers primarily to explicit, inspectable, and reconstructable retrieval procedures rather than a guarantee that external databases will return permanently identical records.
+
+Keywords:
+Reproducible research; Literature search methodology; Multi-source retrieval; Cross-source deduplication; Metadata enrichment; PubMed; Europe PMC; OpenAlex; Semantic Scholar; Crossref; DOAJ; OpenCitations; Medical Subject Headings (MeSH); Evidence synthesis support
+
+________________________________________
+Chapter 1: Introduction
+Transparent and reproducible literature retrieval is a fundamental requirement for reliable scientific research. Literature searches form the basis of systematic reviews, scoping reviews, evidence syntheses, guideline development, and many other forms of scholarly inquiry. When retrieval is performed primarily through graphical database interfaces, precise reconstruction of the retrieval procedure can be difficult because query state, filtering, sorting, and navigation behavior may not be captured completely.
+Programmatic literature retrieval provides a way to represent these operations explicitly. Search terms, filters, source selection, sorting, pagination state, and controlled-vocabulary refinements can be expressed as structured parameters and translated into source-specific API operations.
+LitSearch was developed to support this objective through a web-based retrieval platform that currently integrates:
+• PubMed
+• Europe PMC
+• OpenAlex
+• Semantic Scholar
+• Crossref
+• DOAJ
+
+The application also provides an All Sources workflow that retrieves bounded candidate sets from all six primary sources and processes them through a shared aggregation pipeline.
+A central design principle is the separation of common retrieval concepts from source-specific implementation details. Scholarly APIs differ in query syntax, filtering, sorting, pagination, metadata coverage, result-window constraints, rate limits, and operational behavior. LitSearch therefore does not assume that every source supports the same operations.
+Retrieved records are normalized into a canonical Paper representation. This shared model supports source-independent rendering, centralized cross-source deduplication, metadata merging, deterministic federated ordering, detail processing, and standardized export generation.
+LitSearch also distinguishes retrieval from metadata enrichment. Retrieval connectors determine which publications enter a result set. Enrichment providers operate on already retrieved records and can add supplementary metadata without introducing new publications.
+The platform is intended to support literature identification and retrieval. It does not perform study screening, critical appraisal, risk-of-bias assessment, evidence grading, study eligibility decisions, or evidence synthesis. Those activities remain the responsibility of researchers and review teams.
+
+________________________________________
+Chapter 2: Methods
+
+2.1 System Overview
+LitSearch is implemented as a modular, containerized web application.
+The principal components are:
+• FastAPI for HTTP request handling and application routing
+• Jinja2 for server-rendered user-interface templates
+• source-specific connectors for external scholarly APIs
+• a centralized connector-capability registry
+• a canonical Paper model
+• a centralized All Sources aggregation pipeline
+• deterministic cross-source deduplication and metadata merging
+• Redis for temporary operational state and task coordination
+• ARQ workers for asynchronous export processing
+• a generic metadata-enrichment layer
+• CSV, RIS, and XLSX export generation
+• Docker and Docker Compose for containerized deployment
+• pytest for automated validation
+
+The architecture separates retrieval, normalization, aggregation, enrichment, export, and presentation responsibilities.
+
+For All Sources searches, the processing model is:
+Source-specific candidate retrieval
+↓
+Canonical normalization
+↓
+Candidate aggregation
+↓
+Cross-source deduplication
+↓
+Metadata merging
+↓
+Centralized ordering
+↓
+Temporary snapshot storage
+↓
+Page slicing and presentation
+
+A source failure within the federated retrieval stage does not necessarily terminate the complete All Sources request. Successful sources can continue contributing candidates, while failed sources are recorded in the federated state.
+Redis is used for temporary operational state rather than as a permanent literature archive. The application does not maintain a persistent database containing the external scholarly corpus.
+
+2.2 Connector Capability Model
+Scholarly APIs expose heterogeneous capabilities. LitSearch therefore maintains a centralized capability registry describing supported behavior for each source and, where required, each retrieval mode.
+
+The capability model records:
+• pagination type
+• supported sort modes
+• previous-page support
+• last-page support
+• direct page-jump support
+• publication-year filtering
+• abstract-availability filtering
+• MeSH filtering
+• maximum result-window metadata where applicable
+
+LitSearch distinguishes four pagination types:
+• page
+• cursor
+• token
+• snapshot
+
+The capability registry is used to prevent routing and interface logic from presenting unsupported operations as though all sources behaved identically.
+A capability flag describes behavior supported by the LitSearch integration. It does not guarantee that an external service is operational at a particular moment.
+
+2.3 Data Sources
+
+2.3.1 PubMed
+PubMed provides biomedical literature retrieval through NCBI E-utilities.
+The current connector uses ESearch for identifier retrieval and EFetch for detailed metadata retrieval.
+
+Supported LitSearch behavior includes:
+• free-text search
+• publication-year filtering
+• abstract-availability filtering
+• MeSH filtering
+• AND/OR combination of multiple MeSH descriptors
+• relevance sorting
+• newest-first publication-date sorting
+• page-oriented navigation
+
+Publication-year restrictions are expressed through the PubMed Date - Publication field. Abstract filtering uses the PubMed hasabstract text filter. MeSH descriptors are represented using the MeSH Terms field.
+Oldest-first publication-date sorting is not supported by the current PubMed integration. Unsupported sort requests are normalized rather than being presented as native PubMed behavior.
+Retrieved PubMed records are normalized into the canonical Paper model.
+
+2.3.2 Europe PMC
+Europe PMC provides biomedical literature retrieval and complementary metadata coverage.
+
+The current integration supports:
+• free-text retrieval
+• publication-year filtering
+• abstract-availability filtering
+• MeSH filtering
+• AND/OR combination of multiple MeSH descriptors
+• relevance-oriented retrieval
+• cursor-based pagination
+• previous, last, and page-jump behavior through the LitSearch navigation implementation
+
+Europe PMC MeSH expressions use source-specific MESH syntax and are combined with the base query and other active filters.
+The current capability model exposes relevance sorting only for Europe PMC. Chronological ordering requested in All Sources is applied centrally after candidate aggregation rather than being represented as source-native Europe PMC chronological retrieval.
+
+2.3.3 OpenAlex
+OpenAlex is integrated as a multidisciplinary scholarly metadata source.
+
+The current integration supports:
+• free-text retrieval
+• upstream publication-year filtering
+• native abstract-availability filtering
+• relevance sorting
+• newest-first chronological sorting
+• oldest-first chronological sorting
+• page-oriented navigation
+• concept metadata where available
+
+OpenAlex does not provide LitSearch MeSH retrieval.
+Returned records are normalized into the canonical Paper model before downstream processing.
+
+2.3.4 Semantic Scholar
+Semantic Scholar is integrated through two distinct retrieval modes.
+
+Relevance mode uses the regular paper-search workflow and provides:
+• relevance sorting
+• page-oriented LitSearch navigation backed by offset retrieval
+• previous-page navigation
+• local abstract filtering
+• local publication-year handling in the source-specific implementation
+• no MeSH filtering
+
+Publication-year filtering is not declared as a full-result-set capability in relevance mode because locally filtering an already retrieved candidate page is not equivalent to constraining the complete upstream result set before ranking and pagination.
+The upstream total in relevance mode therefore remains the Semantic Scholar total before LitSearch-side local filtering.
+
+Bulk mode uses token-based retrieval and provides:
+• newest-first chronological retrieval
+• oldest-first chronological retrieval
+• token-based continuation
+• upstream publication-year filtering
+• local abstract filtering
+• no MeSH filtering
+
+The capability registry records a maximum result-window value of 1000 for Semantic Scholar relevance mode. This declarative result-window metadata is distinct from request page size and export limits.
+Semantic Scholar requests are subject to provider-side rate limiting. The connector implements rate-limit coordination and retry behavior. Runtime availability is treated separately from static capability.
+
+2.3.5 Crossref
+Crossref is integrated as a multidisciplinary bibliographic retrieval source through the Crossref REST API.
+
+The current integration supports:
+• free-text works retrieval
+• offset-based retrieval exposed as page-oriented navigation
+• upstream publication-year filtering
+• native abstract-availability filtering
+• relevance sorting
+• newest-first publication-date sorting
+• oldest-first publication-date sorting
+• DOI-based detail retrieval
+
+Publication-year boundaries are translated to Crossref publication-date filters. Abstract filtering uses Crossref's has-abstract filter.
+The connector limits an individual request to at most 100 rows. This is a request-size constraint and is not the total number of Crossref results available for a query.
+Crossref does not support LitSearch MeSH filtering.
+
+2.3.6 DOAJ
+DOAJ is integrated as an open-access-oriented scholarly article retrieval source.
+
+The current integration supports:
+• free-text article retrieval
+• page-based navigation
+• server-side publication-year filtering
+• server-side abstract-availability filtering
+• relevance-oriented source-specific retrieval
+• DOI metadata where available
+• full-text availability metadata where derivable
+• keywords and subject metadata normalized as concepts
+• article-detail retrieval
+
+The connector uses a maximum request page size of 100 records. The capability registry separately records a maximum result window of 1000. These constraints must not be conflated.
+DOAJ exposes relevance sorting only through the current LitSearch integration. It does not support LitSearch MeSH filtering.
+
+2.4 All Sources Aggregation
+All Sources performs bounded federated candidate retrieval from the six primary retrieval sources.
+
+The current deterministic source order is:
+1. PubMed
+2. OpenAlex
+3. Crossref
+4. DOAJ
+5. Europe PMC
+6. Semantic Scholar
+
+The All Sources pipeline performs:
+1. source-specific candidate retrieval
+2. canonical normalization
+3. aggregation of candidate records
+4. cross-source deduplication
+5. metadata merging for matched records
+6. centralized result ordering
+7. temporary snapshot creation
+8. page slicing from the processed snapshot
+
+Candidate depth is bounded. All Sources therefore does not exhaustively retrieve every matching record from every external source.
+Applicable year and abstract filters are propagated to PubMed, OpenAlex, Crossref, DOAJ, and Europe PMC. In the current federated implementation, Semantic Scholar is invoked through relevance-oriented candidate retrieval without the same year and abstract propagation. All Sources filtering should therefore not be interpreted as semantically uniform across every source.
+MeSH parameters are applied only to PubMed and Europe PMC. Because MeSH filtering does not constrain the complete six-source federated result set, the All Sources capability does not declare full MeSH-filter support.
+
+2.5 Cross-Source Deduplication and Metadata Merging
+
+Cross-source deduplication operates on normalized candidate records.
+
+Persistent identifiers are prioritized in the following order where available:
+1. DOI
+2. PMID
+3. PMCID
+
+Identifier normalization removes common DOI prefixes, normalizes case, and handles selected punctuation differences.
+
+When a direct identifier match is unavailable, strict metadata matching can use:
+• normalized title
+• normalized first author
+• publication year
+
+A constrained tolerant match can additionally allow a one-year publication-year discrepancy when title and first-author metadata match and identifier safeguards permit the comparison.
+If both records contain conflicting non-empty persistent identifiers, metadata-based matching is prevented.
+When duplicate records are matched, the primary record preserves existing populated metadata. Missing values can be filled from the duplicate record, and retrieval-source provenance is combined.
+Cross-source metadata merging is distinct from metadata enrichment.
+
+2.6 All Sources Ordering and Snapshots
+For relevance-oriented All Sources results, LitSearch does not calculate a common relevance score across the six external databases.
+Instead, source-specific candidate ordering is retained within each source bucket and the deduplicated candidates are interleaved deterministically using the fixed source order.
+For date_desc and date_asc, LitSearch applies centralized chronological ordering using normalized publication metadata after candidate retrieval and deduplication.
+Processed All Sources state can be stored as a temporary Redis-backed snapshot.
+
+A snapshot contains:
+• processed and ordered Paper records
+• duplicate-removal count
+• per-source candidate counts
+• failed-source information
+• a request signature representing the relevant search state
+
+The signature includes the query, normalized sort mode, candidate-set size, year filters, abstract filter, and MeSH parameters.
+The default snapshot retention period is 900 seconds (15 minutes) and is configurable.
+While the snapshot remains valid, subsequent pages are sliced from the same processed federated state. The snapshot improves short-term pagination consistency but is not a permanent archive.
+
+2.7 Query Construction and Refinement
+LitSearch represents retrieval state through explicit parameters.
+
+Depending on source and mode, these can include:
+• free-text query
+• source selection
+• publication-year boundaries
+• abstract-availability requirement
+• sorting mode
+• pagination state
+• MeSH descriptors
+• MeSH combination mode
+• Semantic Scholar retrieval mode
+• cursor, token, or snapshot state where applicable
+
+The same user-facing parameter does not necessarily map to the same upstream operation for every source. Source-specific connectors translate supported parameters according to upstream API semantics.
+URLs can preserve substantial search state, but not every pagination mechanism can be reduced to a permanently reproducible URL independent of temporary server-side state. Cursor-, token-, and snapshot-based workflows may depend on state whose validity is temporary or provider-controlled.
+Procedural reproducibility therefore means that the retrieval strategy and application behavior can be inspected and reconstructed; it does not imply that external databases will always return an identical record set at a later date.
+
+2.8 MeSH-Based Refinement
+
+MeSH filtering is currently supported for:
+• PubMed
+• Europe PMC
+
+For PubMed, selected descriptors are translated to MeSH Terms expressions.
+For Europe PMC, selected descriptors are translated to source-specific MESH expressions.
+
+Multiple selected descriptors can be combined using:
+• AND
+• OR
+
+The resulting MeSH expression is combined with the base query and applicable filters.
+OpenAlex, Semantic Scholar, Crossref, and DOAJ do not declare MeSH-filter capability.
+All Sources can propagate MeSH parameters internally to PubMed and Europe PMC, but MeSH does not constrain the complete six-source result set. For that reason, All Sources does not expose MeSH as a full federated filtering capability.
+MeSH retrieval must also be distinguished from PubMed-derived MeSH metadata enrichment. Retrieval refinement affects which publications are searched for. Enrichment adds MeSH metadata to an already retrieved Paper where a suitable PubMed record can be identified.
+
+2.9 Search Execution and Result Inspection
+Search execution follows the pagination model declared for the active source and mode.
+
+The current models include:
+• page-based pagination
+• cursor-based pagination
+• token-based pagination
+• snapshot-based pagination
+
+Supported sorting also depends on source and mode:
+PubMed:
+• relevance
+• date_desc
+
+Europe PMC:
+• relevance
+
+OpenAlex:
+• relevance
+• date_desc
+• date_asc
+
+Crossref:
+• relevance
+• date_desc
+• date_asc
+
+DOAJ:
+• relevance
+
+Semantic Scholar relevance mode:
+• relevance
+
+Semantic Scholar bulk mode:
+• date_desc
+• date_asc
+
+All Sources:
+• relevance
+• date_desc
+• date_asc
+
+Retrieved records are normalized before common presentation.
+Where supported, users can inspect extended metadata and follow links to source records, DOI landing pages, or available full-text resources.
+Runtime source failures remain possible because the application depends on external APIs.
+
+2.10 Canonical Paper Model
+
+The current canonical Paper model contains:
+• id
+• source
+• title
+• authors
+• journal
+• year
+• publication_date
+• abstract
+• doi
+• pmcid
+• url
+• mesh_terms
+• has_full_text
+• concepts
+• citation_count
+• reference_count
+• enrichment_sources
+
+There is no separate canonical pmid field. For PubMed records, the canonical id can represent the PMID.
+The enrichment_sources mapping records providers that actually changed supported fields through enrichment. It is not a complete provenance graph for every canonical field.
+The canonical model is broader than the current standard export schema.
+
+2.11 Metadata Enrichment
+Metadata enrichment operates on already retrieved and normalized Paper records.
+
+The generic enrichment layer separates:
+• provider-specific lookup behavior
+• provider matching
+• generic merge behavior
+• field-level enrichment provenance
+
+Supported enrichment list fields include:
+• mesh_terms
+• concepts
+
+Supported scalar fields include:
+• abstract
+• citation_count
+• reference_count
+
+For scalar fields, an existing populated value is preserved. An enrichment value fills the field only when the canonical value is empty.
+List fields are merged using case-insensitive duplicate detection while preserving deterministic order and existing representation where possible.
+Provider failures do not invalidate the underlying retrieved Paper.
+
+The current runtime detail workflow configures:
+• PubMed-derived MeSH enrichment
+• OpenCitations enrichment
+
+The PubMed MeSH provider can use a PubMed identifier directly for PubMed-derived records. For suitable non-PubMed records, DOI-to-PubMed resolution can identify a corresponding PubMed record and obtain assigned MeSH descriptors.
+OpenCitations enrichment requires a DOI and can add citation_count and reference_count independently when available.
+Enrichment is currently associated primarily with individual paper-detail processing. It is not a mandatory stage for every search-result list or standard export.
+The enrichment architecture defines a cache-compatible interface, but this report does not claim that all enrichment responses are currently stored in an active persistent enrichment cache.
+
+2.12 Data Export and Reproducibility
+
+LitSearch supports:
+• CSV
+• RIS
+• XLSX
+
+CSV and XLSX currently use the following nine-field schema:
+• ID
+• Source
+• Title
+• Authors
+• Journal
+• Year
+• DOI
+• PMCID
+• URL
+
+RIS uses a defined bibliographic mapping including journal article type, title, authors, journal, year, DOI, PMCID where available, URL, and record identifier.
+The standard export schema does not automatically include every canonical Paper field. In particular, fields such as abstract, mesh_terms, concepts, citation_count, reference_count, and enrichment_sources are not automatically included in the current CSV and XLSX schema.
+Export requests preserve relevant search context, including source, query, sort, scope, filters, and pagination or federated state where applicable.
+Long-running exports can be executed asynchronously through ARQ workers coordinated through Redis.
+Search and export workflows share source-specific retrieval logic where applicable, but this report does not claim unconditional byte-identical parity between every interactive result view and every export under all external API conditions.
+
+2.13 Asynchronous Export Jobs
+Large export operations can require repeated source retrieval, normalization, aggregation, deduplication, sorting, and serialization.
+LitSearch uses ARQ background workers to execute asynchronous export jobs without blocking the interactive web request.
+
+Conceptually:
+Export request
+↓
+ARQ job
+↓
+Source-specific or All Sources retrieval
+↓
+Normalization
+↓
+Applicable deduplication and ordering
+↓
+File generation
+↓
+Download workflow
+
+Redis coordinates job state and temporary task information.
+
+External API availability and rate limits can affect asynchronous export execution just as they can affect interactive retrieval.
+
+2.14 Software Validation and Sanity Checks
+LitSearch uses layered validation.
+
+Automated unit and regression tests cover areas such as:
+• connector behavior
+• query construction
+• capability declarations
+• filtering
+• sorting
+• pagination behavior
+• canonical normalization
+• All Sources aggregation
+• deduplication and metadata merging
+• export generation
+• enrichment merge behavior
+• user-interface behavior
+
+Capability tests verify that declared source and mode behavior remains synchronized with expected routing and interface behavior.
+Connector and workflow tests validate source-specific integration logic.
+Docker-dependent tests are marked separately where the test requires running services. A filename containing "integration" does not by itself define the pytest integration marker.
+Live-source sanity checks are treated separately from deterministic automated tests because external APIs can transiently return rate-limit responses, service errors, or changing metadata.
+Manual browser and running-application checks are used where end-to-end behavior requires verification beyond isolated unit tests.
+Release-level validation remains a separate step. The presence of implemented and tested functionality in the development line does not by itself declare a software release complete.
+
+2.15 Performance Characteristics
+
+LitSearch performance depends on:
+• external API latency
+• source-specific pagination behavior
+• candidate depth
+• export scope
+• rate limiting
+• network conditions
+• Redis-backed operational state
+• background-worker availability
+
+The six retrieval sources do not have equivalent throughput or pagination characteristics.
+Federated All Sources retrieval performs concurrent source calls and therefore depends on the slowest participating operations as well as failure handling and candidate depth.
+Temporary snapshots reduce the need to repeat complete All Sources retrieval for every subsequent page while the snapshot remains valid.
+Large exports are moved to asynchronous workers to preserve web-interface responsiveness.
+No single performance figure should be treated as invariant because external services and network conditions are outside LitSearch control.
+
+Chapter 3: Architectural Design
+3.1 Canonical Data Model
+The canonical Paper model is the principal abstraction between heterogeneous source responses and common downstream processing.
+Source connectors map upstream metadata into the canonical representation. Downstream code can then operate on normalized fields rather than source-specific response structures.
+
+This supports:
+• common rendering
+• centralized deduplication
+• metadata merging
+• centralized All Sources ordering
+• export generation
+• detail-page processing
+• metadata enrichment
+• validation
+
+The canonical model intentionally permits missing values because metadata availability differs among sources.
+
+3.2 Source Connector Architecture
+
+Dedicated connector logic exists for:
+• PubMed
+• Europe PMC
+• OpenAlex
+• Semantic Scholar
+• Crossref
+• DOAJ
+
+Connectors can be responsible for:
+• query translation
+• filtering
+• sort translation
+• pagination
+• API communication
+• retry and rate-limit behavior
+• response parsing
+• canonical normalization
+• detail retrieval
+
+Adding a retrieval source requires more than implementing an API call. The source must also be represented in capabilities, normalization, relevant routing and interface behavior, All Sources integration where intended, deduplication workflows, export workflows, and validation.
+
+3.3 Capability Registry
+The capability registry centralizes static descriptions of supported retrieval behavior.
+The registry prevents source-specific conditions from being duplicated unnecessarily throughout templates and routes.
+Capabilities are declarative. They describe intended LitSearch behavior but do not imply runtime availability.
+The current source/mode distinctions are especially important for Semantic Scholar, where relevance and bulk chronological retrieval use different pagination, sorting, and filtering semantics.
+
+3.4 All Sources Architecture
+All Sources is implemented as a centralized federated pipeline rather than as independent duplicated logic in each user-interface or export path.
+
+The pipeline retrieves bounded candidates from:
+1. PubMed
+2. OpenAlex
+3. Crossref
+4. DOAJ
+5. Europe PMC
+6. Semantic Scholar
+
+Source calls are performed concurrently.
+Each source failure is isolated so that a partial federated result can still be produced where other sources succeed.
+After retrieval, candidates undergo centralized deduplication, metadata merging, and ordering.
+Temporary Redis-backed snapshots preserve the processed result state for subsequent pagination during the configured retention period.
+
+3.5 Deduplication Architecture
+Deduplication uses normalized persistent identifiers where available and guarded bibliographic matching where direct identifier matches are unavailable.
+
+The implementation deliberately distinguishes:
+• identifier equality
+• identifier conflict
+• strict metadata matching
+• constrained tolerant metadata matching
+
+This avoids treating title similarity alone as sufficient evidence for merging records that contain conflicting persistent identifiers.
+Metadata merging preserves existing populated values and fills missing values from matched duplicates.
+
+3.6 Enrichment Architecture
+The enrichment package separates provider behavior from generic merge semantics.
+A provider returns an enrichment result for an existing Paper.
+The merge layer decides whether supported fields should change.
+Provider failure is isolated from primary retrieval.
+
+The current providers are:
+• PubMed-derived MeSH metadata provider
+• OpenCitations citation/reference metadata provider
+
+Enrichment provenance is recorded only for fields actually changed by enrichment.
+
+3.7 Asynchronous Processing Architecture
+ARQ workers execute asynchronous export workflows.
+Redis provides task coordination and temporary job state.
+This architecture prevents long-running export retrieval and serialization from blocking the interactive FastAPI request.
+Background processing remains subject to the same external API constraints as interactive retrieval.
+
+3.8 Export Architecture
+Export processing operates on normalized Paper records but serializes explicit export schemas rather than the complete canonical model.
+
+Supported formats are:
+• CSV
+• RIS
+• XLSX
+
+CSV and XLSX use the current nine-field schema documented in Section 2.12.
+The architecture allows export behavior to evolve independently from the canonical model, provided schema changes are explicit and validated.
+
+3.9 Temporary Operational State
+Redis supports temporary All Sources snapshots, ARQ/background-task infrastructure, and distributed Semantic Scholar rate limiting.
+All Sources snapshots have a configurable retention period and are not permanent archives.
+The enrichment architecture contains a cache-compatible abstraction, but an interface alone is not evidence of an active persistent enrichment cache.
+Technical documentation therefore distinguishes verified runtime state from architectural extension points.
+
+3.10 Reproducibility by Design
+
+LitSearch promotes procedural reproducibility through:
+• explicit query parameterization
+• source-aware capability declarations
+• deterministic query construction
+• canonical normalization
+• deterministic deduplication rules
+• deterministic federated ordering
+• explicit export schemas
+• temporary snapshot-based pagination for All Sources
+• containerized deployment
+• layered validation
+
+These mechanisms make retrieval procedures inspectable and reconstructable.
+They do not freeze external scholarly databases or guarantee that the same upstream records will be returned indefinitely.
+
+________________________________________
+Chapter 4: Ethical and Methodological Considerations
+LitSearch is intended to support transparent and responsible literature retrieval.
+External scholarly APIs remain authoritative for their own content, availability, indexing practices, and usage policies. LitSearch must therefore respect provider-specific operational requirements such as rate limits, request identification, and authentication where applicable.
+Data Privacy
+LitSearch is not designed as a persistent repository of personal user data or literature records.
+Temporary operational state can be stored in Redis for application functionality such as pagination, snapshots, and asynchronous job processing.
+Such state is operational and should not be interpreted as permanent archival preservation.
+Reproducibility and Transparency
+LitSearch supports procedural reproducibility through explicit retrieval parameters, source-aware query construction, canonical normalization, deterministic bibliographic processing, explicit export schemas, and containerized deployment.
+The appropriate claim is that retrieval procedures can be inspected, documented, reconstructed, and evaluated.
+Because upstream databases change over time, identical future result sets cannot be guaranteed.
+Cross-Source Retrieval Considerations
+All Sources increases retrieval breadth by combining bounded candidate sets from multiple sources.
+
+However:
+• source coverage differs
+• relevance models differ
+• filter semantics differ
+• metadata completeness differs
+• candidate depth is bounded
+• one source can fail while others succeed
+• MeSH applies only to PubMed and Europe PMC
+• current federated year/abstract propagation is not uniform for Semantic Scholar
+
+A federated result should therefore be interpreted as the output of the documented LitSearch aggregation procedure, not as an exhaustive union of every record available from every upstream database.
+Deduplication and Metadata Merging
+Deduplication reduces repeated representations of the same publication but cannot guarantee perfect duplicate identification.
+Persistent identifier conflicts are used as safeguards against inappropriate metadata-based merging.
+Merged metadata remain dependent on the quality of upstream records.
+Metadata Enrichment
+Enrichment is separate from primary retrieval.
+An enrichment provider can add metadata to an existing record but does not independently establish the scientific quality, relevance, or evidential strength of that publication.
+OpenCitations citation and reference counts are provider-derived metadata and are not treated as quality scores.
+Role of Human Judgment
+
+LitSearch does not:
+• assess study quality
+• determine eligibility
+• perform risk-of-bias assessment
+• grade evidence
+• interpret study findings
+• perform evidence synthesis
+• replace expert review processes
+
+Researchers remain responsible for screening, appraisal, interpretation, synthesis, and methodological decisions outside the retrieval layer.
+
+________________________________________
+Chapter 5: Limitations
+
+5.1 External API Dependence
+LitSearch relies on external scholarly APIs.
+
+Retrieval can therefore be affected by:
+• service interruptions
+• rate limits
+• authentication state
+• network failures
+• upstream API changes
+• metadata changes
+• source-specific result-window constraints
+• source-specific ranking changes
+
+A temporary external failure does not necessarily indicate a LitSearch logic defect.
+
+5.2 Incomplete and Heterogeneous Coverage
+No integrated source provides complete coverage of all scholarly literature.
+The six sources differ in disciplinary scope, indexing practices, metadata availability, document types, and update schedules.
+All Sources combines bounded candidate sets and should not be interpreted as an exhaustive union of all upstream records.
+
+5.3 Heterogeneous Filter Semantics
+Equivalent user-facing filters can be implemented differently by different sources.
+Some filters are applied upstream.
+Some Semantic Scholar filtering is applied locally after retrieval.
+MeSH is available only for PubMed and Europe PMC.
+Consequently, filter labels must be interpreted according to source and mode capabilities.
+
+5.4 All Sources Filter Semantics
+All Sources propagates year and abstract parameters to PubMed, OpenAlex, Crossref, DOAJ, and Europe PMC.
+The current federated Semantic Scholar call does not receive the same year and abstract parameters.
+Therefore, All Sources year and abstract filtering is not fully uniform across all six candidate streams.
+All Sources does not declare full MeSH-filter capability because MeSH applies only to PubMed and Europe PMC.
+
+5.5 Bounded Federated Retrieval
+All Sources retrieves bounded candidate sets rather than exhausting each source's complete result population.
+Deduplication and final ordering therefore operate on the retrieved candidate pool.
+This is particularly important when interpreting chronological ordering or source representation in queries with very large upstream result sets.
+
+5.6 Relevance Ordering
+There is no universal relevance score shared by the six sources.
+All Sources relevance presentation uses deterministic source-balanced interleaving.
+The fixed source order is an implementation rule for deterministic presentation, not a scientific ranking of databases.
+
+5.7 Deduplication Limitations
+Persistent identifiers can be missing, malformed, or inconsistent.
+Bibliographic metadata can differ between sources.
+The tolerant matching rule can accommodate a limited publication-year discrepancy, but perfect duplicate detection cannot be guaranteed.
+Identifier-conflict safeguards reduce the risk of inappropriate merging but cannot eliminate every metadata ambiguity.
+
+5.8 Metadata Quality
+Canonical metadata quality depends on upstream source metadata.
+Fields can be missing or inconsistent.
+Cross-source merging can fill selected missing values but does not independently verify the scientific correctness of every metadata element.
+
+5.9 Temporary Snapshot State
+All Sources snapshots are temporary.
+The default retention period is approximately 900 seconds and is configurable.
+After snapshot expiration, a repeated federated search can retrieve a different candidate population because upstream databases are dynamic.
+
+5.10 Cursor and Token Pagination
+Cursor- and token-based APIs can depend on provider-issued state.
+These mechanisms improve traversal of large result sets but can limit arbitrary navigation or long-term reconstruction of an identical pagination state.
+
+5.11 Partial Source Failure
+All Sources can continue when an individual source fails.
+This improves resilience but means the returned result set can be partial.
+A failed source is not equivalent to a successful source returning zero matches.
+
+5.12 Semantic Scholar Operational Constraints
+Semantic Scholar can be affected by restrictive rate limits and transient runtime failures.
+Relevance and bulk modes also differ materially in pagination, sorting, and filtering semantics.
+These differences are represented explicitly rather than hidden behind a single generic behavior.
+
+5.13 Enrichment Limitations
+Enrichment depends on provider coverage and identifier matching.
+OpenCitations requires a DOI.
+PubMed-derived MeSH enrichment requires a PubMed record match, directly or through DOI resolution.
+Provider failure leaves the primary retrieved Paper intact.
+Enrichment is not currently a mandatory stage for every result list or standard export.
+
+5.14 Export Limitations
+The canonical Paper model contains more fields than the current standard CSV and XLSX exports.
+
+The current nine-field CSV/XLSX schema excludes fields such as:
+• abstract
+• mesh_terms
+• concepts
+• citation_count
+• reference_count
+• enrichment_sources
+
+Standard exports therefore should not be interpreted as complete serialization of the internal Paper model.
+
+5.15 Temporal Reproducibility
+External databases evolve.
+Records can be added, corrected, reindexed, or removed, and ranking algorithms or API behavior can change.
+LitSearch can make the retrieval procedure explicit and reconstructable, but it cannot guarantee permanently identical future results from external services.
+
+5.16 Methodological Scope
+LitSearch supports literature identification and retrieval.
+It does not perform screening, appraisal, risk-of-bias assessment, evidence grading, or synthesis.
+Its methodological contribution is a transparent computational retrieval layer rather than automated scientific interpretation.
+
+________________________________________
+Conclusion
+LitSearch provides a modular framework for transparent, reproducible, and multi-source scientific literature retrieval.
+
+The current implementation integrates six primary retrieval sources:
+• PubMed
+• Europe PMC
+• OpenAlex
+• Semantic Scholar
+• Crossref
+• DOAJ
+
+Source-specific connectors preserve differences in query syntax, filtering, sorting, pagination, metadata structures, and operational constraints while mapping records into a shared canonical Paper model.
+A centralized capability registry describes supported source and mode behavior. This allows the user interface and routing logic to remain source-aware rather than assuming feature equivalence across heterogeneous APIs.
+The All Sources workflow performs bounded federated candidate retrieval, cross-source deduplication, metadata merging, deterministic ordering, and temporary snapshot-based pagination. Persistent identifiers including DOI, PMID, and PMCID support duplicate detection, while guarded bibliographic matching provides additional fallback behavior.
+Controlled-vocabulary retrieval remains source-specific. PubMed and Europe PMC support MeSH refinement; OpenAlex, Semantic Scholar, Crossref, and DOAJ do not expose equivalent LitSearch MeSH retrieval.
+Metadata enrichment is architecturally separate from primary retrieval. PubMed-derived MeSH metadata and OpenCitations citation/reference counts can augment applicable detail records without introducing new publications into search result sets.
+CSV, RIS, and XLSX exports provide explicit bibliographic output schemas for downstream workflows. Asynchronous ARQ workers support longer-running export operations.
+The system is designed to make retrieval procedures inspectable, reconstructable, and auditable while acknowledging that external scholarly databases remain dynamic and operationally heterogeneous.
+LitSearch does not replace researcher judgment in screening, appraisal, eligibility assessment, interpretation, or evidence synthesis.
+Its technical contribution is an extensible and source-aware computational layer that connects explicit researcher-defined search state to heterogeneous scholarly retrieval infrastructures while preserving transparent processing boundaries, provenance, and methodological constraints.
