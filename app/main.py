@@ -518,6 +518,28 @@ def _mesh_list(mesh: str) -> list[str]:
     return [p.strip() for p in m.split("|") if p.strip()]
 
 
+def _max_page_for_result_window(
+    per_page: int,
+    max_result_window: int | None,
+) -> int | None:
+    if max_result_window is None:
+        return None
+
+    return max(1, math.ceil(max_result_window / per_page))
+
+
+def _pageable_count(
+    total_count: int,
+    max_result_window: int | None,
+) -> int:
+    count = max(0, int(total_count or 0))
+
+    if max_result_window is not None:
+        count = min(count, max_result_window)
+
+    return count
+
+
 def _doi_url(doi: str | None) -> str:
     d = (doi or "").strip()
     if not d:
@@ -1378,7 +1400,7 @@ async def search(
     year_min_i = _safe_int(year_min, None)
     year_max_i = _safe_int(year_max, None)
 
-    if source in {"europe_pmc", "pubmed", "doaj"}:
+    if source in {"europe_pmc", "pubmed", "crossref", "doaj"}:
         capabilities = get_search_mode_capabilities(source)
 
         if ui_sort not in capabilities.supported_sorts:
@@ -2326,6 +2348,13 @@ async def search(
         per_page = max(1, int(n))
         page_i = max(1, int(page))
 
+        max_page = _max_page_for_result_window(
+            per_page,
+            capabilities.max_result_window,
+        )
+        if max_page is not None:
+            page_i = min(page_i, max_page)
+
         year_min_i = _safe_int(year_min, None)
         year_max_i = _safe_int(year_max, None)
 
@@ -2343,7 +2372,15 @@ async def search(
         papers = [_paper_to_dict(p, source="crossref") for p in (crossref_papers or [])]
         papers = papers[:per_page]
 
-        total_pages = max(1, math.ceil(max(0, int(total_count or 0)) / per_page))
+        pageable_count = _pageable_count(
+            total_count,
+            capabilities.max_result_window,
+        )
+
+        total_pages = max(
+            1,
+            math.ceil(pageable_count / per_page),
+        )
 
         base_params = {
             "q": q,
@@ -2452,6 +2489,13 @@ async def search(
         per_page = max(1, int(n))
         page_i = max(1, int(page))
 
+        max_page = _max_page_for_result_window(
+            per_page,
+            capabilities.max_result_window,
+        )
+        if max_page is not None:
+            page_i = min(page_i, max_page)
+
         year_min_i = _safe_int(year_min, None)
         year_max_i = _safe_int(year_max, None)
 
@@ -2475,9 +2519,14 @@ async def search(
         papers = [_paper_to_dict(p, source="doaj") for p in (doaj_papers or [])]
         papers = papers[:per_page]
 
+        pageable_count = _pageable_count(
+            total_count,
+            capabilities.max_result_window,
+        )
+
         total_pages = max(
             1,
-            math.ceil(max(0, int(total_count or 0)) / per_page),
+            math.ceil(pageable_count / per_page),
         )
 
         base_params = {
