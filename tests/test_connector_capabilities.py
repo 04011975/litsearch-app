@@ -85,6 +85,12 @@ def test_doaj_result_window_is_declared():
     assert capabilities.max_result_window == 1000
 
 
+def test_crossref_result_window_is_declared():
+    capabilities = get_search_mode_capabilities("crossref")
+
+    assert capabilities.max_result_window == 10000
+
+
 def test_doaj_supports_relevance_sort_only():
     capabilities = get_search_mode_capabilities("doaj")
 

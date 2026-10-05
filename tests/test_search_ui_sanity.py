@@ -106,6 +106,7 @@ def test_template_context_exposes_europe_pmc_mesh_capability(client):
     assert context["supports_mesh_filter"] is True
     assert context["mesh_mode"] == "and"
 
+
 def test_pubmed_search_page_has_results(client):
     r = client.get(
         "/search",
@@ -331,7 +332,6 @@ def test_europe_pmc_previous_navigation_goes_to_previous_page(client, monkeypatc
     )
 
 
-
 def test_europe_pmc_previous_navigation_preserves_mesh_mode(client, monkeypatch):
     async def fake_europe_pmc_search(*args, **kwargs):
         papers = [
@@ -377,7 +377,9 @@ def test_europe_pmc_previous_navigation_preserves_mesh_mode(client, monkeypatch)
 
     assert r.status_code == 200
 
-    previous_href = r.text.split(">Previous</a>")[0].rsplit('href="', 1)[-1].split('"', 1)[0]
+    previous_href = (
+        r.text.split(">Previous</a>")[0].rsplit('href="', 1)[-1].split('"', 1)[0]
+    )
 
     assert "mesh_mode=and" in previous_href
 
@@ -771,9 +773,7 @@ def test_europe_pmc_reset_filters_preserves_mesh_parameters(
     assert r.status_code == 200
 
     reset_href = (
-        r.text.split("Reset filters")[0]
-        .rsplit('href="', 1)[-1]
-        .split('"', 1)[0]
+        r.text.split("Reset filters")[0].rsplit('href="', 1)[-1].split('"', 1)[0]
     )
 
     assert "mesh=" in reset_href
@@ -804,10 +804,7 @@ def test_europe_pmc_goto_page_preserves_mesh_filters(
 
     assert r.status_code == 200
 
-    goto_form = (
-        r.text.split('id="goto_form"', 1)[1]
-        .split("</form>", 1)[0]
-    )
+    goto_form = r.text.split('id="goto_form"', 1)[1].split("</form>", 1)[0]
 
     assert 'name="mesh" value="Humans|Adolescent"' in goto_form
     assert 'name="mesh_mode" value="and"' in goto_form
@@ -877,10 +874,9 @@ def test_europe_pmc_async_export_params_preserve_mesh_filters(
 
     assert r.status_code == 200
 
-    build_params = (
-        r.text.split("function buildParams()", 1)[1]
-        .split("return params;", 1)[0]
-    )
+    build_params = r.text.split("function buildParams()", 1)[1].split(
+        "return params;", 1
+    )[0]
 
     assert 'params.set("mesh", "Humans|Adolescent");' in build_params
     assert 'params.set("mesh_mode", "and");' in build_params
@@ -1811,6 +1807,97 @@ def test_doaj_unsupported_sort_falls_back_to_relevance(client, monkeypatch):
     assert '<option value="relevance" selected>' in r.text
 
 
+def test_doaj_pagination_respects_max_result_window(client, monkeypatch):
+    def fake_doaj_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="doaj-test-id",
+                    source="doaj",
+                    title="Test DOAJ paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doaj.org/article/doaj-test-id",
+                    mesh_terms=[],
+                    has_full_text=True,
+                )
+            ],
+            11722,
+        )
+
+    monkeypatch.setattr("app.main.doaj_search", fake_doaj_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "doaj",
+            "n": 10,
+            "page": 1,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert "11,722" in r.text
+    assert "page <strong>1</strong>" in r.text
+    assert "of <strong>100</strong>" in r.text
+    assert "page=100" in r.text
+    assert "page=101" not in r.text
+    assert 'max="100"' in r.text
+
+
+def test_doaj_page_beyond_result_window_is_clamped_before_connector(
+    client, monkeypatch
+):
+    called_page = None
+
+    def fake_doaj_search(*args, **kwargs):
+        nonlocal called_page
+        called_page = kwargs["page"]
+        return (
+            [
+                Paper(
+                    id="doaj-test-id",
+                    source="doaj",
+                    title="Test DOAJ paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doaj.org/article/doaj-test-id",
+                    mesh_terms=[],
+                    has_full_text=True,
+                )
+            ],
+            11722,
+        )
+
+    monkeypatch.setattr("app.main.doaj_search", fake_doaj_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "doaj",
+            "n": 10,
+            "page": 101,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert called_page == 100
+    assert "page <strong>100</strong>" in r.text
+    assert "of <strong>100</strong>" in r.text
+
+
 def test_doaj_export_limit_stops_at_1000(client, monkeypatch):
     def fake_doaj_search(*args, **kwargs):
         return (
@@ -2402,12 +2489,100 @@ def test_crossref_abstract_filter_is_preserved_in_next_link(client, monkeypatch)
 
     assert r.status_code == 200
 
-    next_link = next(
-        line for line in r.text.splitlines() if ">Next</a>" in line
-    )
+    next_link = next(line for line in r.text.splitlines() if ">Next</a>" in line)
 
     assert "page=2" in next_link
     assert "has_abstract=1" in next_link
+
+
+def test_crossref_pagination_respects_max_result_window(client, monkeypatch):
+    def fake_crossref_search(*args, **kwargs):
+        return (
+            [
+                Paper(
+                    id="10.1234/example",
+                    source="crossref",
+                    title="Test Crossref paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doi.org/10.1234/example",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            6147144,
+        )
+
+    monkeypatch.setattr("app.main.crossref_search", fake_crossref_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "machine learning cancer",
+            "source": "crossref",
+            "n": 10,
+            "page": 1,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert "page <strong>1</strong>" in r.text
+    assert "of <strong>1000</strong>" in r.text
+    assert "page=1000" in r.text
+    assert "page=1001" not in r.text
+    assert 'max="1000"' in r.text
+
+
+def test_crossref_page_beyond_result_window_is_clamped_before_connector(
+    client, monkeypatch
+):
+    called_page = None
+
+    def fake_crossref_search(*args, **kwargs):
+        nonlocal called_page
+        called_page = kwargs["page"]
+        return (
+            [
+                Paper(
+                    id="10.1234/example",
+                    source="crossref",
+                    title="Test Crossref paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/example",
+                    pmcid=None,
+                    url="https://doi.org/10.1234/example",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            6147144,
+        )
+
+    monkeypatch.setattr("app.main.crossref_search", fake_crossref_search)
+
+    r = client.get(
+        "/search",
+        params={
+            "q": "machine learning cancer",
+            "source": "crossref",
+            "n": 10,
+            "page": 1001,
+            "sort": "relevance",
+        },
+    )
+
+    assert r.status_code == 200
+    assert called_page == 1000
+    assert "page <strong>1000</strong>" in r.text
+    assert "of <strong>1000</strong>" in r.text
 
 
 def test_pubmed_previous_navigation_goes_to_previous_page(

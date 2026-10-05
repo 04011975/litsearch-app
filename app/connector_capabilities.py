@@ -102,6 +102,7 @@ CONNECTOR_CAPABILITIES: dict[str, SearchSourceCapabilities] = {
                 supports_year_filter=True,
                 supports_abstract_filter=True,
                 supports_mesh_filter=False,
+                max_result_window=10000,
             )
         },
     ),
