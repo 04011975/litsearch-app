@@ -1,12 +1,14 @@
 LitSearch — Reproducible Literature Search Tool
 
-Version: 0.4.0
+Version: 0.6.0
 
 Sources:
 - PubMed
 - Europe PMC
 - OpenAlex
 - Semantic Scholar
+- Crossref
+- DOAJ
 
 Architecture:
 - FastAPI
@@ -18,12 +20,19 @@ Architecture:
 
 LitSearch is a web-based literature search application designed to support reproducible, transparent, and multi-source academic literature retrieval through programmatic access to scientific literature databases.
 
-The system currently integrates:
+The system currently integrates six literature retrieval sources:
 
 - PubMed (NCBI E-utilities)
 - Europe PMC
 - OpenAlex
 - Semantic Scholar
+- Crossref
+- DOAJ
+
+LitSearch also supports metadata enrichment on paper detail pages through
+separate enrichment providers, including PubMed MeSH enrichment and
+OpenCitations citation/reference counts. Enrichment providers augment retrieved
+records without acting as primary literature retrieval sources.
 
 LitSearch enables:
 
@@ -79,7 +88,7 @@ FastAPI (main.py)
 ↓
 Connector Layer
 ↓
-PubMed / Europe PMC / OpenAlex / Semantic Scholar
+PubMed / Europe PMC / OpenAlex / Semantic Scholar / Crossref / DOAJ
 ↓
 Canonical Paper Model
 ↓
@@ -240,11 +249,29 @@ q	free-text search query
 year_min	minimum publication year
 year_max	maximum publication year
 has_abstract	filter records with abstracts
-mesh	MeSH refinement (PubMed only)
+mesh    MeSH refinement (PubMed and Europe PMC)
 mesh_mode	AND / OR combination for MeSH terms
 sort	relevance, most recent, or oldest first
 page	pagination
 n	records per page
+
+Supported capabilities vary by source and search mode. The user interface uses
+the connector capability registry to expose only applicable sort, filter, and
+navigation behavior.
+
+Notable source-specific behavior:
+
+- PubMed supports relevance and newest-first sorting, but not oldest-first.
+- Europe PMC supports relevance sorting only and uses cursor-based pagination.
+- OpenAlex and Crossref support relevance, newest-first, and oldest-first.
+- DOAJ supports relevance sorting only.
+- Semantic Scholar relevance mode uses page-based retrieval and does not support
+  direct page jumps, last-page navigation, or year filtering.
+- Semantic Scholar chronological mode uses token-based retrieval for newest-first
+  and oldest-first sorting and supports year filtering.
+- Crossref exposes at most a 10,000-record navigable result window.
+- DOAJ exposes at most a 1,000-record navigable result window.
+- Semantic Scholar relevance mode exposes at most a 1,000-record result window.
 
 Example:
 
@@ -266,6 +293,8 @@ candidate records from:
 - Europe PMC
 - OpenAlex
 - Semantic Scholar
+- Crossref
+- DOAJ
 
 Workflow:
 
@@ -304,6 +333,10 @@ url
 pmcid
 mesh_terms
 has_full_text
+concepts
+citation_count
+reference_count
+enrichment_sources
 
 Benefits:
 
@@ -313,6 +346,27 @@ cross-source deduplication
 unified filtering and sorting
 easier integration of additional literature sources
 simplified maintenance and extensibility
+
+Enrichment metadata is kept separate from retrieval identity. The `source`
+field identifies where the paper was retrieved, while `enrichment_sources`
+records provenance for metadata added by enrichment providers.
+
+### Metadata Enrichment
+
+Paper detail pages can augment retrieved metadata through a separate
+best-effort enrichment pipeline.
+
+Current providers include:
+
+- PubMed MeSH enrichment
+- OpenCitations citation and reference counts
+
+Enrichment is separate from primary literature retrieval. Provider failures do
+not discard the retrieved paper, existing identity metadata is preserved, and
+provenance for added metadata is recorded in `enrichment_sources`.
+
+OpenCitations is therefore an enrichment provider, not one of the six primary
+literature retrieval sources.
 
 ## 8. Export Functionality
 
@@ -477,6 +531,10 @@ OpenAlex
 /search?source=openalex&q=type%202%20diabetes
 Semantic Scholar
 /search?source=semantic_scholar&q=type%202%20diabetes
+Crossref
+/search?source=crossref&q=type%202%20diabetes
+DOAJ
+/search?source=doaj&q=type%202%20diabetes
 
 These queries are intended as stable regression checks and can be used after code changes, dependency upgrades, or infrastructure updates.
 
@@ -491,23 +549,39 @@ LitSearch performs source-level and cross-source deduplication, but upstream dat
 large exports depend on Redis and asynchronous worker availability
 external API latency may influence search and export performance
 
+Crossref navigation is limited to the first 10,000 records
+DOAJ navigation is limited to the first 1,000 records
+Semantic Scholar relevance-mode retrieval is limited to the first 1,000 records
+source capabilities for sorting, filtering, and navigation are not uniform
+
 ## 15. Development Architecture
 
 ```text
 app/
 ├── main.py
 ├── all_sources.py
+├── connector_capabilities.py
 ├── redis_client.py
 │
 ├── connectors/
 │   ├── pubmed.py
 │   ├── europe_pmc.py
 │   ├── openalex.py
-│   └── semantic_scholar.py
+│   ├── semantic_scholar.py
+│   ├── crossref.py
+│   ├── doaj.py
+│   └── opencitations.py
 │
 ├── core/
 │   ├── deduplication.py
 │   └── retry.py
+│
+├── enrichment/
+│   ├── base.py
+│   ├── cache.py
+│   ├── merge.py
+│   ├── pipeline.py
+│   └── providers/
 │
 ├── jobs/
 │   ├── arq_worker.py
@@ -535,6 +609,8 @@ jobs/epmc_tasks.py — Europe PMC background/cursor tasks
 jobs/export_tasks.py — asynchronous export generation
 models/paper.py — canonical Paper data model
 templates/ — Jinja2 user interface templates
+connector_capabilities.py — source- and mode-specific search capability registry
+enrichment/ — metadata enrichment provider, pipeline, merge, cache, and provenance logic
 
 ## 16. Future Extensions
 

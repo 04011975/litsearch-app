@@ -15,19 +15,22 @@ Retrieval
 Paper normalization
     |
     v
-Deduplication
+Search / deduplication / filtering / sorting
+    |
+    v
+Search results
+    |
+    v
+Paper detail retrieval
     |
     v
 Metadata enrichment
     |
     v
-Filtering and sorting
-    |
-    v
-UI and export
+Paper detail UI
 ```
 
-Enrichment is performed after deduplication so that the same publication is not enriched multiple times through different retrieval sources.
+In the current v0.6.0 runtime, metadata enrichment is applied to paper detail requests rather than to the complete search result set. This keeps enrichment separate from primary retrieval and avoids enriching every candidate returned during search.
 
 ## Core Components
 
@@ -128,34 +131,40 @@ This means that Crossref supplied the retrieved record, while PubMed supplied th
 - provider protocol;
 - enrichment result model;
 - centralized merge policy;
-- best-effort pipeline;
+- best-effort enrichment pipeline;
 - cache protocol;
 - provenance fields in `Paper`;
-- unit tests for merge and pipeline behavior.
+- PubMed MeSH enrichment provider;
+- OpenCitations enrichment provider;
+- citation and reference count enrichment through OpenCitations;
+- paper-detail runtime integration;
+- enrichment metadata display on paper detail pages;
+- unit tests for merge, pipeline, and provider behavior.
 
 ### Not Yet Implemented
 
-- PubMed MeSH provider;
-- Redis cache implementation;
-- All Sources runtime integration;
-- enrichment UI;
+- Redis-backed enrichment cache implementation;
+- All Sources bulk enrichment;
 - enrichment export columns;
 - OpenAlex topic enrichment;
-- OpenCitations enrichment.
+- PubChem enrichment;
+- ChEMBL enrichment.
 
-## Planned Providers
+## Enrichment Providers
 
-### Initial Providers
+### Implemented Enrichment Providers
 
 1. PubMed MeSH
-2. OpenAlex Topics / Concepts
-3. OpenCitations citation metadata
+2. OpenCitations citation metadata
 
-### Possible Future Providers
+### Possible Future Enrichment Providers
 
-- Europe PMC
+- OpenAlex Topics / Concepts
+- Europe PMC metadata enrichment
 - PubChem
 - ChEMBL
+
+OpenAlex and Europe PMC are already implemented as primary literature retrieval sources. Their inclusion above refers only to possible future use as metadata enrichment providers.
 
 ## Design Constraints
 
