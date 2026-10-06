@@ -6,11 +6,13 @@ These documents describe long-lived design decisions, component responsibilities
 
 ## Documents
 
+- [All Sources Behavior](all-sources-behavior.md)
 - [Metadata Enrichment](metadata-enrichment.md)
+- [Architecture Decision Log](decision-log.md)
 
-## Planned documents
+## Historical and Review Documents
 
-- All Sources retrieval
-- Deduplication
-- Export architecture
-- The Lens (evaluation)
+Additional documents in this directory capture earlier architecture states,
+focused reviews, and refactoring investigations. They are retained as
+historical engineering records and should not be interpreted as the complete
+current v0.6.0 architecture.
