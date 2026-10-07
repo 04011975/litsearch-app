@@ -164,7 +164,7 @@ def _extract_concept_suggestions(
 
 load_dotenv()
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.6.0"
 
 DEBUG_ENDPOINTS = os.getenv("DEBUG_ENDPOINTS", "0") == "1"
 
