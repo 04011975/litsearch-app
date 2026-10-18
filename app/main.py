@@ -271,7 +271,7 @@ async def lifespan(app: FastAPI):
 
         try:
             if ARQ_REDIS is not None:
-                await ARQ_REDIS.close()
+                await ARQ_REDIS.aclose()
         except Exception:
             logger.exception("Failed closing ARQ_REDIS")
         ARQ_REDIS = None
