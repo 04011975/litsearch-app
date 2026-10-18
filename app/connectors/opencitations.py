@@ -7,6 +7,8 @@ from urllib.parse import quote
 
 import httpx
 
+from app.identifiers import normalize_doi
+
 OPENCITATIONS_API_BASE_URL = os.getenv(
     "OPENCITATIONS_API_BASE_URL",
     "https://api.opencitations.net/index/v2",
@@ -18,35 +20,6 @@ OPENCITATIONS_ACCESS_TOKEN = os.getenv(
 ).strip()
 
 OPENCITATIONS_TIMEOUT_SECONDS = float(os.getenv("OPENCITATIONS_TIMEOUT_SECONDS", "20"))
-
-
-def normalize_doi(value: str | None) -> str | None:
-    """Normalize a DOI for use with the OpenCitations API."""
-
-    doi = str(value or "").strip()
-
-    if not doi:
-        return None
-
-    lowered = doi.casefold()
-
-    prefixes = (
-        "https://doi.org/",
-        "http://doi.org/",
-        "https://dx.doi.org/",
-        "http://dx.doi.org/",
-        "doi:",
-    )
-
-    for prefix in prefixes:
-        if lowered.startswith(prefix):
-            doi = doi[len(prefix) :].strip()
-            break
-
-    if not doi.casefold().startswith("10."):
-        return None
-
-    return doi.lower()
 
 
 def _headers() -> dict[str, str]:

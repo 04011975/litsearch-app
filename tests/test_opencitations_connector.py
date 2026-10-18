@@ -43,3 +43,15 @@ def test_parse_count_rejects_invalid_count() -> None:
 
 def test_parse_count_rejects_negative_count() -> None:
     assert _parse_count([{"count": "-1"}]) is None
+
+
+def test_normalize_doi_rejects_malformed_doi() -> None:
+    assert normalize_doi("10.abc") is None
+    assert normalize_doi("10.1000/") is None
+    assert normalize_doi("10.1000/abc def") is None
+
+
+def test_normalize_doi_rejects_malformed_doi():
+    assert normalize_doi("10.abc") is None
+    assert normalize_doi("10.1000/") is None
+    assert normalize_doi("10.1000/abc def") is None
