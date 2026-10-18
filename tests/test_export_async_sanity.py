@@ -1,13 +1,28 @@
 import time
 import pytest
+import httpx
+import os
 
-from app.main import ARQ_REDIS
+from fastapi.testclient import TestClient
+import app.main as main
 
+pytestmark = pytest.mark.integration
 
-pytestmark = pytest.mark.skipif(
-    ARQ_REDIS is None,
-    reason="Async export backend not available (Redis/ARQ not configured).",
-)
+def _download_from_server(download_url: str):
+    base_url = os.environ.get(
+        "LITSEARCH_TEST_BASE_URL",
+        "http://localhost:8001",
+    ).rstrip("/")
+
+    with httpx.Client(base_url=base_url, timeout=30.0) as http_client:
+        return http_client.get(download_url)
+
+@pytest.fixture
+def client():
+    with TestClient(main.app) as test_client:
+        if main.ARQ_REDIS is None:
+            pytest.skip("Redis/ARQ backend not available after startup.")
+        yield test_client
 
 
 def _wait_until_done(client, job_id: str, timeout_s: float = 30.0, sleep_s: float = 1.0):
@@ -62,7 +77,7 @@ def test_async_export_job_pubmed_csv(client):
     assert meta["fmt"] == "csv"
     assert meta["source"] == "pubmed"
 
-    download = client.get(data["download_url"])
+    download = _download_from_server(data["download_url"])
     assert download.status_code == 200
     assert "text/csv" in download.headers.get("content-type", "")
     assert "attachment" in download.headers.get("content-disposition", "")
@@ -92,7 +107,7 @@ def test_async_export_job_openalex_csv(client):
     assert meta["status"] == "done"
     assert meta["source"] == "openalex"
 
-    download = client.get(data["download_url"])
+    download = _download_from_server(data["download_url"])
     assert download.status_code == 200
     assert "text/csv" in download.headers.get("content-type", "")
     assert "ID,Source,Title,Authors,Journal,Year,DOI,PMCID,URL" in download.text
@@ -122,7 +137,7 @@ def test_async_export_job_epmc_csv(client):
     assert meta["status"] == "done"
     assert meta["source"] == "europe_pmc"
 
-    download = client.get(data["download_url"])
+    download = _download_from_server(data["download_url"])
     assert download.status_code == 200
     assert "text/csv" in download.headers.get("content-type", "")
     assert "ID,Source,Title,Authors,Journal,Year,DOI,PMCID,URL" in download.text
