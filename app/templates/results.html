@@ -100,7 +100,16 @@
 <form id="search_form" action="/search" method="get" style="margin-bottom: 1rem;">
   <input name="q" value="{{ q }}" placeholder="Search query" size="50" />
 
-  <select name="source">
+  <select id="lookup_mode" name="lookup" aria-label="Search mode">
+    <option value="" {% if lookup != "doi" %}selected{% endif %}>
+      Literature search
+    </option>
+    <option value="doi" {% if lookup == "doi" %}selected{% endif %}>
+      Exact DOI lookup (Crossref)
+    </option>
+  </select>
+
+  <select id="search_source" name="source">
     {% for key, info in source_specializations.items() %}
       <option value="{{ key }}" {% if current_source == key %}selected{% endif %}>
         {{ info.label }}
@@ -692,6 +701,66 @@
 
   meshInput.addEventListener("input", syncChipState);
   syncChipState();
+})();
+</script>
+
+<script>
+(function () {
+  const form = document.getElementById("search_form");
+  if (!form) return;
+
+  const lookupMode = document.getElementById("lookup_mode");
+  const sourceSelect = document.getElementById("search_source");
+
+  if (!lookupMode || !sourceSelect) return;
+
+  const filterNames = [
+    "n",
+    "sort",
+    "year_min",
+    "year_max",
+    "has_abstract",
+    "mesh",
+    "mesh_mode"
+  ];
+
+  const originalDisabled = new Map();
+
+  filterNames.forEach(function (name) {
+    const field = form.elements.namedItem(name);
+    if (field) {
+      originalDisabled.set(name, field.disabled);
+    }
+  });
+
+  function updateLookupMode() {
+    const isDoiLookup = lookupMode.value === "doi";
+
+    if (isDoiLookup) {
+      sourceSelect.value = "crossref";
+    }
+
+    sourceSelect.disabled = isDoiLookup;
+
+    filterNames.forEach(function (name) {
+      const field = form.elements.namedItem(name);
+      if (field) {
+        field.disabled = isDoiLookup
+          ? true
+          : originalDisabled.get(name);
+      }
+    });
+  }
+
+  lookupMode.addEventListener("change", updateLookupMode);
+  updateLookupMode();
+
+  form.addEventListener("submit", function () {
+    if (lookupMode.value === "doi") {
+      sourceSelect.disabled = false;
+      sourceSelect.value = "crossref";
+    }
+  });
 })();
 </script>
 

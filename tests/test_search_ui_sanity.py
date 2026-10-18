@@ -13,6 +13,54 @@ def test_search_page_loads(client):
     assert "Search Results" in r.text or "LitSearch" in r.text
 
 
+def test_homepage_offers_exact_doi_lookup(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'value="crossref"' in response.text
+    assert 'name="lookup"' in response.text
+    assert 'value="doi"' in response.text
+
+
+def test_crossref_doi_lookup_preserves_search_mode(client, monkeypatch):
+    import app.main as main
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        lambda identifier: None,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'name="lookup"' in response.text
+    assert re.search(
+        r'<option[^>]*value="doi"[^>]*selected',
+        response.text,
+    )
+
+
+def test_exact_doi_lookup_rejects_unsupported_source(client):
+    response = client.get(
+        "/search",
+        params={
+            "source": "pubmed",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_template_context_exposes_semantic_scholar_last_capability(client):
     request = client.get("/search").request
 
@@ -2670,6 +2718,21 @@ def test_openalex_shows_abstract_filter(client, monkeypatch):
 
 
 def test_openalex_search_passes_abstract_filter(client, monkeypatch):
+    async def fake_cache_get_json(redis, key):
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        return None
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json",
+        fake_cache_get_json,
+    )
+    monkeypatch.setattr(
+        "app.main.cache_set_json",
+        fake_cache_set_json,
+    )
+
     calls = []
 
     def fake_openalex_search(*args, **kwargs):
@@ -2699,6 +2762,21 @@ def test_openalex_search_passes_abstract_filter(client, monkeypatch):
 
 
 def test_openalex_page_one_fetches_upstream_only_once(client, monkeypatch):
+    async def fake_cache_get_json(redis, key):
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        return None
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json",
+        fake_cache_get_json,
+    )
+    monkeypatch.setattr(
+        "app.main.cache_set_json",
+        fake_cache_set_json,
+    )
+
     calls = []
 
     def fake_openalex_search(*args, **kwargs):
@@ -2863,3 +2941,278 @@ def test_openalex_uses_cached_page_without_upstream_call(client, monkeypatch):
 
     assert r.status_code == 200
     assert "Cached OpenAlex paper" in r.text
+
+
+def test_crossref_exact_doi_lookup_uses_detail_fetch(client, monkeypatch):
+    import app.main as main
+
+    calls = []
+
+    def fake_crossref_fetch_detail(identifier):
+        calls.append(identifier)
+        return None
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "https://doi.org/10.1000/Example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["10.1000/example"]
+
+
+def test_crossref_exact_doi_lookup_displays_found_paper(client, monkeypatch):
+    import app.main as main
+
+    paper = Paper(
+        id="10.1000/example",
+        source="crossref",
+        title="Exact DOI Lookup Test Article",
+        doi="10.1000/example",
+    )
+
+    def fake_crossref_fetch_detail(identifier):
+        assert identifier == "10.1000/example"
+        return paper
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Exact DOI Lookup Test Article" in response.text
+
+
+def test_crossref_exact_doi_lookup_rejects_invalid_doi(client, monkeypatch):
+    import app.main as main
+
+    def fake_crossref_fetch_detail(identifier):
+        raise AssertionError(
+            "Invalid DOI must not trigger a detail request"
+        )
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "not-a-valid-doi",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Invalid DOI identifier." in response.text
+
+
+def test_crossref_exact_doi_lookup_not_found(client, monkeypatch):
+    import app.main as main
+
+    calls = []
+
+    def fake_crossref_fetch_detail(identifier):
+        calls.append(identifier)
+        return None
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/not-found",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["10.1000/not-found"]
+    assert "Invalid DOI identifier." not in response.text
+
+    assert response.context["total_count"] == 0
+    assert response.context["papers"] == []
+    assert response.context["total_pages"] == 1
+
+
+def test_crossref_exact_doi_lookup_handles_api_error(client, monkeypatch):
+    import app.main as main
+
+    def fake_crossref_fetch_detail(identifier):
+        raise RuntimeError("Crossref temporarily unavailable")
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == (
+        "Crossref is temporarily unavailable. Please try again later."
+    )
+
+
+def test_crossref_exact_doi_lookup_rejects_mismatched_doi(
+    client, monkeypatch
+):
+    import app.main as main
+
+    paper = Paper(
+        id="10.1000/different",
+        source="crossref",
+        title="Incorrect DOI Match",
+        doi="10.1000/different",
+    )
+
+    def fake_crossref_fetch_detail(identifier):
+        assert identifier == "10.1000/example"
+        return paper
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert "Incorrect DOI Match" not in response.text
+
+
+def test_crossref_exact_doi_lookup_rejects_missing_doi(
+    client, monkeypatch
+):
+    import app.main as main
+
+    paper = Paper(
+        id="crossref-record-without-doi",
+        source="crossref",
+        title="Article Without DOI",
+        doi=None,
+    )
+
+    def fake_crossref_fetch_detail(identifier):
+        assert identifier == "10.1000/example"
+        return paper
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert "Article Without DOI" not in response.text
+

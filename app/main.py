@@ -5,6 +5,8 @@ import csv
 import hashlib
 import io
 
+from app.identifiers import doi_matches, normalize_doi
+
 import math
 import os
 import re
@@ -1287,9 +1289,12 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
     if source == "crossref":
         try:
             return await _run_sync(crossref_fetch_detail, pid)
-        except Exception:
+        except Exception as exc:
             logger.exception("Crossref detail failed pid=%s", pid)
-            return None
+            raise HTTPException(
+                status_code=503,
+                detail="Crossref is temporarily unavailable. Please try again later.",
+            ) from exc
 
     if source == "doaj":
         try:
@@ -1367,6 +1372,7 @@ def favicon():
 async def search(
     request: Request,
     q: str = Query("", description="Query"),
+    lookup: str = Query("", description="Exact identifier lookup mode"),
     source: str = Query("pubmed", pattern=SOURCE_PATTERN),
     n: int = Query(10, ge=1, le=50),
     page: int = Query(1, ge=1),
@@ -1392,6 +1398,13 @@ async def search(
     # Normalize inputs
     # --------------------------
     q = (q or "").strip()
+
+    if lookup == "doi" and source != "crossref":
+        raise HTTPException(
+            status_code=422,
+            detail="Exact DOI lookup is currently supported only for Crossref.",
+        )
+
     mesh = _normalize_mesh(mesh)
     ui_sort = normalize_all_sources_sort(sort)
 
@@ -2305,6 +2318,78 @@ async def search(
     # CROSSREF
     # --------------------------
     if source == "crossref":
+
+        if lookup == "doi":
+            doi = normalize_doi(q)
+
+            if doi is None:
+                paper = None
+                lookup_error = "Invalid DOI identifier."
+            else:
+                try:
+                    paper = await _run_sync(crossref_fetch_detail, doi)
+                    lookup_error = None
+                except Exception:
+                    logger.exception(
+                        "Crossref DOI lookup failed doi=%s",
+                        doi,
+                    )
+                    paper = None
+                    lookup_error = (
+                        "Crossref is temporarily unavailable. "
+                        "Please try again later."
+                    )
+
+            if paper is not None and not doi_matches(doi, paper.doi):
+                logger.warning(
+                    "Crossref DOI mismatch requested=%s returned=%s",
+                    doi,
+                    paper.doi,
+                )
+                paper = None
+
+            papers = (
+                [_paper_to_dict(paper, source="crossref")] if paper is not None else []
+            )
+
+            ctx = _template_base_context(
+                request,
+                q=q,
+                source="crossref",
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
+
+            ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+            ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+
+            ctx.update(
+                {
+                    "papers": papers,
+                    "mesh_suggestions": [],
+                    "concept_suggestions": [],
+                    "total_count": len(papers),
+                    "total_pages": 1,
+                    "error": lookup_error,
+                    "warning": None,
+                    "previous_url": None,
+                    "next_url": None,
+                    "last_url": None,
+                    "lookup": "doi",
+                }
+            )
+
+            return templates.TemplateResponse(
+                request,
+                "results.html",
+                ctx,
+            )
+
         logger.info(
             "CROSSREF SEARCH request q=%r page=%s n=%s sort=%s year_min=%r year_max=%r",
             q,
