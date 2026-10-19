@@ -658,6 +658,124 @@ def test_export_all_sources_csv_page(client, monkeypatch):
     assert "text/csv" in r.headers.get("content-type", "")
     assert "Mock All Sources Paper" in r.text
 
+
+def test_export_all_sources_ris_page(client, monkeypatch):
+    async def fake_build_all_source_results(**kwargs):
+        assert kwargs["page"] == 2
+        assert kwargs["n"] == 10
+        assert kwargs["sort"] == "relevance"
+        assert kwargs["snapshot_id"] == "snapshot-test-123"
+        assert "redis" in kwargs
+
+        return {
+            "papers": [
+                Paper(
+                    id="all-test-id",
+                    source="openalex",
+                    title="Mock All Sources Paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/all-test",
+                    pmcid=None,
+                    url="https://example.org/all-test",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            "all_papers": [],
+            "total_count": 1,
+            "duplicates_removed": 0,
+            "source_counts": {"openalex": 1},
+            "failed_sources": [],
+        }
+
+    monkeypatch.setattr(
+        "app.main.build_all_source_results",
+        fake_build_all_source_results,
+    )
+
+    r = client.get(
+        "/export/ris",
+        params={
+            "q": "cancer",
+            "source": "all",
+            "scope": "page",
+            "page": 2,
+            "n": 10,
+            "sort": "relevance",
+            "snapshot_id": "snapshot-test-123",
+        },
+    )
+
+    assert r.status_code == 200
+    assert "application/x-research-info-systems" in r.headers.get("content-type", "")
+    assert "TY  - JOUR" in r.text
+    assert "Mock All Sources Paper" in r.text
+    assert "ER  -" in r.text
+
+
+def test_export_all_sources_xlsx_page(client, monkeypatch):
+    async def fake_build_all_source_results(**kwargs):
+        assert kwargs["page"] == 2
+        assert kwargs["n"] == 10
+        assert kwargs["sort"] == "relevance"
+        assert kwargs["snapshot_id"] == "snapshot-test-123"
+        assert "redis" in kwargs
+
+        return {
+            "papers": [
+                Paper(
+                    id="all-test-id",
+                    source="openalex",
+                    title="Mock All Sources Paper",
+                    authors=["Tester A"],
+                    journal="Test Journal",
+                    year=2024,
+                    abstract="Test abstract",
+                    doi="10.1234/all-test",
+                    pmcid=None,
+                    url="https://example.org/all-test",
+                    mesh_terms=[],
+                    has_full_text=False,
+                )
+            ],
+            "all_papers": [],
+            "total_count": 1,
+            "duplicates_removed": 0,
+            "source_counts": {"openalex": 1},
+            "failed_sources": [],
+        }
+
+    monkeypatch.setattr(
+        "app.main.build_all_source_results",
+        fake_build_all_source_results,
+    )
+
+    r = client.get(
+        "/export/xlsx",
+        params={
+            "q": "cancer",
+            "source": "all",
+            "scope": "page",
+            "page": 2,
+            "n": 10,
+            "sort": "relevance",
+            "snapshot_id": "snapshot-test-123",
+        },
+    )
+
+    assert r.status_code == 200
+    assert (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        in r.headers.get("content-type", "")
+    )
+
+    data = io.BytesIO(r.content)
+    assert zipfile.is_zipfile(data)
+
+
 def test_export_crossref_page_passes_abstract_filter(client, monkeypatch):
     calls = []
 

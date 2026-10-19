@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 import os
 from typing import List, Optional, Tuple
+from urllib.parse import quote
 
 import requests
 
+from app.identifiers import normalize_doi
 from app.models.paper import Paper
 
 logger = logging.getLogger("litsearch.connector.crossref")
@@ -25,13 +27,8 @@ def _user_agent() -> str:
 
 
 def _normalize_doi(raw: Optional[str]) -> Optional[str]:
-    if not raw:
-        return None
-    s = raw.strip().lower()
-    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
-        if s.startswith(prefix):
-            s = s[len(prefix):].strip()
-    return s or None
+    """Normalize DOI using the shared identifier utility."""
+    return normalize_doi(raw)
 
 
 def _first_text(value) -> str:
@@ -55,9 +52,10 @@ def _extract_authors(item: dict) -> List[str]:
 
     return authors
 
+
 def _extract_year(item: dict) -> Optional[int]:
     for key in ("published-print", "published-online", "published", "issued"):
-        parts = ((item.get(key) or {}).get("date-parts") or [])
+        parts = (item.get(key) or {}).get("date-parts") or []
         if parts and isinstance(parts[0], list) and parts[0]:
             try:
                 return int(parts[0][0])
@@ -68,7 +66,7 @@ def _extract_year(item: dict) -> Optional[int]:
 
 def _extract_publication_date(item: dict) -> Optional[str]:
     for key in ("published-print", "published-online", "published", "issued"):
-        parts = ((item.get(key) or {}).get("date-parts") or [])
+        parts = (item.get(key) or {}).get("date-parts") or []
         if parts and isinstance(parts[0], list) and parts[0]:
             nums = parts[0]
             try:
@@ -132,6 +130,7 @@ def crossref_search(
     has_abstract: bool = False,
 ) -> Tuple[List[Paper], int]:
     q = (q or "").strip()
+
     page = max(1, int(page))
     n = min(max(1, int(n)), ROWS_MAX)
 
@@ -205,27 +204,38 @@ def crossref_fetch_detail(identifier: str) -> Paper | None:
     if not doi:
         return None
 
+    encoded_doi = quote(doi, safe="")
+
     params = {"mailto": CONTACT_EMAIL} if CONTACT_EMAIL else None
 
     try:
         r = requests.get(
-            f"{BASE_URL}{SEARCH_ENDPOINT}/{doi}",
+            f"{BASE_URL}{SEARCH_ENDPOINT}/{encoded_doi}",
             params=params,
             timeout=(10, 90),
             headers={"User-Agent": _user_agent()},
         )
+
         if r.status_code == 404:
             return None
+
         if r.status_code == 429:
-            logger.warning("crossref_fetch_detail rate limited doi=%s", doi)
-            return None
+            logger.warning(
+                "crossref_fetch_detail rate limited doi=%s",
+                doi,
+            )
+
         r.raise_for_status()
         data = r.json() or {}
-    except Exception:
-        logger.exception("crossref_fetch_detail failed identifier=%r", identifier)
-        return None
 
-    item = (data.get("message") or {})
+    except requests.exceptions.RequestException:
+        logger.exception(
+            "crossref_fetch_detail request failed doi=%s",
+            doi,
+        )
+        raise
+
+    item = data.get("message") or {}
     if not item:
         return None
 

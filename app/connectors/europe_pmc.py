@@ -405,6 +405,7 @@ def europe_pmc_fetch_detail(
     pid: str,
     *,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    raise_on_error: bool = False,
 ) -> Paper | None:
     pid = (pid or "").strip()
     if not pid:
@@ -448,4 +449,6 @@ def europe_pmc_fetch_detail(
         return None
     except Exception:
         logger.exception("Europe PMC detail fetch failed pid=%r", pid)
+        if raise_on_error:
+            raise
         return None

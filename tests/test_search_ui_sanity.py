@@ -13,6 +13,623 @@ def test_search_page_loads(client):
     assert "Search Results" in r.text or "LitSearch" in r.text
 
 
+def test_homepage_offers_exact_doi_lookup(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'value="crossref"' in response.text
+    assert 'name="lookup"' in response.text
+    assert 'value="doi"' in response.text
+    assert "Exact DOI lookup (All Sources / Crossref)" in response.text
+
+
+def test_crossref_doi_lookup_preserves_search_mode(client, monkeypatch):
+    import app.main as main
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        lambda identifier: None,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'name="lookup"' in response.text
+    assert re.search(
+        r'<option[^>]*value="doi"[^>]*selected',
+        response.text,
+    )
+
+
+def test_exact_doi_lookup_rejects_unsupported_source(client):
+    response = client.get(
+        "/search",
+        params={
+            "source": "pubmed",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Exact DOI lookup is currently supported only for All Sources and Crossref."
+    )
+
+
+def test_all_sources_exact_doi_lookup_uses_central_pipeline(
+    client, monkeypatch
+):
+    import app.main as main
+
+    calls = []
+
+    async def fake_lookup_doi(identifier):
+        calls.append(identifier)
+
+        from app.doi_lookup import DoiLookupResult
+
+        return DoiLookupResult(doi=identifier)
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+        raising=False,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "https://doi.org/10.1000/Example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["10.1000/example"]
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+
+
+def test_all_sources_exact_pmid_lookup_uses_central_pipeline(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmidLookupResult
+
+    calls = []
+
+    async def fake_lookup_pmid(identifier):
+        calls.append(identifier)
+        return PmidLookupResult(pmid=identifier)
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": " 12345678 ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["12345678"]
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["lookup"] == "pmid"
+
+
+def test_all_sources_exact_pmcid_lookup_uses_central_pipeline(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmcidLookupResult
+
+    calls = []
+
+    async def fake_lookup_pmcid(identifier):
+        calls.append(identifier)
+        return PmcidLookupResult(pmcid=identifier)
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmcid",
+        fake_lookup_pmcid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmcid",
+            "q": "  pmc1234567  ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["PMC1234567"]
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["lookup"] == "pmcid"
+
+
+def test_all_sources_exact_pmcid_lookup_rejects_invalid_pmcid(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_pmcid(identifier):
+        raise AssertionError(
+            "Invalid PMCID must not trigger central lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmcid",
+        fake_lookup_pmcid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmcid",
+            "q": "ABC123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == "Invalid PMCID identifier."
+    assert response.context["lookup"] == "pmcid"
+
+
+def test_all_sources_exact_pmcid_lookup_displays_found_paper(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmcidLookupResult
+    from app.models.paper import Paper
+
+    paper = Paper(
+        id="PMC1234567",
+        source="europe_pmc",
+        title="Example PMCID publication",
+        pmcid="PMC1234567",
+    )
+
+    async def fake_lookup_pmcid(identifier):
+        assert identifier == "PMC1234567"
+        return PmcidLookupResult(
+            pmcid=identifier,
+            paper=paper,
+            found_in=["europe_pmc"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmcid",
+        fake_lookup_pmcid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmcid",
+            "q": "PMC1234567",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["total_count"] == 1
+    assert len(response.context["papers"]) == 1
+    assert response.context["papers"][0]["title"] == (
+        "Example PMCID publication"
+    )
+    assert response.context["found_in"] == ["europe_pmc"]
+    assert response.context["lookup"] == "pmcid"
+
+
+def test_all_sources_exact_pmcid_lookup_reports_failed_source(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmcidLookupResult
+
+    async def fake_lookup_pmcid(identifier):
+        assert identifier == "PMC1234567"
+        return PmcidLookupResult(
+            pmcid=identifier,
+            failed_sources=["europe_pmc"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmcid",
+        fake_lookup_pmcid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmcid",
+            "q": "PMC1234567",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["failed_sources"] == ["europe_pmc"]
+    assert response.context["warning"] == (
+        "Exact PMCID lookup could not check these sources: europe_pmc"
+    )
+    assert response.context["lookup"] == "pmcid"
+
+
+def test_exact_pmcid_lookup_rejects_unsupported_source(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_pmcid(identifier):
+        raise AssertionError(
+            "Unsupported source must not trigger PMCID lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmcid",
+        fake_lookup_pmcid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "pmcid",
+            "q": "PMC1234567",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Exact PMCID lookup is currently supported only for All Sources."
+    )
+
+
+def test_all_sources_exact_pmid_lookup_rejects_invalid_pmid(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_pmid(identifier):
+        raise AssertionError(
+            "Invalid PMID must not trigger central lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "ABC123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == "Invalid PMID identifier."
+    assert response.context["lookup"] == "pmid"
+
+
+def test_all_sources_exact_pmid_lookup_displays_found_paper(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmidLookupResult
+    from app.models.paper import Paper
+
+    paper = Paper(
+        id="12345678",
+        source="pubmed",
+        title="Example PMID publication",
+    )
+
+    async def fake_lookup_pmid(identifier):
+        assert identifier == "12345678"
+        return PmidLookupResult(
+            pmid=identifier,
+            paper=paper,
+            found_in=["pubmed"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "12345678",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["total_count"] == 1
+    assert len(response.context["papers"]) == 1
+    assert response.context["papers"][0]["title"] == (
+        "Example PMID publication"
+    )
+    assert response.context["found_in"] == ["pubmed"]
+    assert response.context["lookup"] == "pmid"
+
+def test_all_sources_exact_pmid_lookup_reports_failed_source(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmidLookupResult
+
+    async def fake_lookup_pmid(identifier):
+        assert identifier == "12345678"
+        return PmidLookupResult(
+            pmid=identifier,
+            failed_sources=["pubmed"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "12345678",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["failed_sources"] == ["pubmed"]
+    assert response.context["warning"] == (
+        "Exact PMID lookup could not check these sources: pubmed"
+    )
+    assert response.context["lookup"] == "pmid"
+
+
+def test_exact_pmid_lookup_rejects_unsupported_source(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_pmid(identifier):
+        raise AssertionError(
+            "Unsupported source must not trigger PMID lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "pmid",
+            "q": "12345678",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Exact PMID lookup is currently supported only for All Sources."
+    )
+
+
+def test_search_interface_shows_exact_pmid_lookup_option(client):
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "ABC123",
+        },
+    )
+
+    assert response.status_code == 200
+
+    html = response.text
+
+    assert "Exact PMID lookup (All Sources)" in html
+    assert 'value="pmid" selected' in html
+    assert 'value="" selected' not in html
+
+
+def test_search_interface_shows_exact_pmcid_lookup_option(client):
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmcid",
+            "q": "ABC123",
+        },
+    )
+
+    assert response.status_code == 200
+
+    html = response.text
+
+    assert "Exact PMCID lookup (All Sources)" in html
+    assert 'value="pmcid" selected' in html
+    assert (
+        html.index('<select id="lookup_mode"')
+        < html.index('value="pmcid" selected')
+        < html.index("</select>", html.index('<select id="lookup_mode"'))
+    )
+    assert 'value="" selected' not in html
+
+
+def test_all_sources_exact_doi_lookup_rejects_invalid_doi(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_doi(identifier):
+        raise AssertionError(
+            "Invalid DOI must not trigger central lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "not-a-valid-doi",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == "Invalid DOI identifier."
+
+
+def test_all_sources_exact_doi_lookup_displays_found_paper(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import DoiLookupResult
+
+    paper = Paper(
+        id="10.1000/example",
+        source="pubmed",
+        title="All Sources Exact DOI Test Article",
+        doi="10.1000/example",
+    )
+
+    async def fake_lookup_doi(identifier):
+        assert identifier == "10.1000/example"
+
+        return DoiLookupResult(
+            doi=identifier,
+            paper=paper,
+            found_in=["pubmed", "crossref"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "https://doi.org/10.1000/Example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "All Sources Exact DOI Test Article" in response.text
+    assert response.context["total_count"] == 1
+    assert len(response.context["papers"]) == 1
+    assert response.context["found_in"] == ["pubmed", "crossref"]
+
+
+def test_all_sources_exact_doi_lookup_preserves_failed_sources(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import DoiLookupResult
+
+    paper = Paper(
+        id="10.1000/example",
+        source="pubmed",
+        title="DOI Lookup With Partial Source Failure",
+        doi="10.1000/example",
+    )
+
+    async def fake_lookup_doi(identifier):
+        assert identifier == "10.1000/example"
+
+        return DoiLookupResult(
+            doi=identifier,
+            paper=paper,
+            found_in=["pubmed", "crossref"],
+            failed_sources=["semantic_scholar"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["total_count"] == 1
+    assert response.context["found_in"] == ["pubmed", "crossref"]
+    assert response.context["failed_sources"] == ["semantic_scholar"]
+    assert "DOI Lookup With Partial Source Failure" in response.text
+    assert response.context["warning"] == (
+        "Exact DOI lookup could not check these sources: semantic_scholar"
+    )
+    assert "Exact DOI lookup could not check these sources: semantic_scholar" in response.text
+
+
 def test_template_context_exposes_semantic_scholar_last_capability(client):
     request = client.get("/search").request
 
@@ -2670,6 +3287,21 @@ def test_openalex_shows_abstract_filter(client, monkeypatch):
 
 
 def test_openalex_search_passes_abstract_filter(client, monkeypatch):
+    async def fake_cache_get_json(redis, key):
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        return None
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json",
+        fake_cache_get_json,
+    )
+    monkeypatch.setattr(
+        "app.main.cache_set_json",
+        fake_cache_set_json,
+    )
+
     calls = []
 
     def fake_openalex_search(*args, **kwargs):
@@ -2699,6 +3331,21 @@ def test_openalex_search_passes_abstract_filter(client, monkeypatch):
 
 
 def test_openalex_page_one_fetches_upstream_only_once(client, monkeypatch):
+    async def fake_cache_get_json(redis, key):
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        return None
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json",
+        fake_cache_get_json,
+    )
+    monkeypatch.setattr(
+        "app.main.cache_set_json",
+        fake_cache_set_json,
+    )
+
     calls = []
 
     def fake_openalex_search(*args, **kwargs):
@@ -2863,3 +3510,278 @@ def test_openalex_uses_cached_page_without_upstream_call(client, monkeypatch):
 
     assert r.status_code == 200
     assert "Cached OpenAlex paper" in r.text
+
+
+def test_crossref_exact_doi_lookup_uses_detail_fetch(client, monkeypatch):
+    import app.main as main
+
+    calls = []
+
+    def fake_crossref_fetch_detail(identifier):
+        calls.append(identifier)
+        return None
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "https://doi.org/10.1000/Example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["10.1000/example"]
+
+
+def test_crossref_exact_doi_lookup_displays_found_paper(client, monkeypatch):
+    import app.main as main
+
+    paper = Paper(
+        id="10.1000/example",
+        source="crossref",
+        title="Exact DOI Lookup Test Article",
+        doi="10.1000/example",
+    )
+
+    def fake_crossref_fetch_detail(identifier):
+        assert identifier == "10.1000/example"
+        return paper
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Exact DOI Lookup Test Article" in response.text
+
+
+def test_crossref_exact_doi_lookup_rejects_invalid_doi(client, monkeypatch):
+    import app.main as main
+
+    def fake_crossref_fetch_detail(identifier):
+        raise AssertionError(
+            "Invalid DOI must not trigger a detail request"
+        )
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "not-a-valid-doi",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Invalid DOI identifier." in response.text
+
+
+def test_crossref_exact_doi_lookup_not_found(client, monkeypatch):
+    import app.main as main
+
+    calls = []
+
+    def fake_crossref_fetch_detail(identifier):
+        calls.append(identifier)
+        return None
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/not-found",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["10.1000/not-found"]
+    assert "Invalid DOI identifier." not in response.text
+
+    assert response.context["total_count"] == 0
+    assert response.context["papers"] == []
+    assert response.context["total_pages"] == 1
+
+
+def test_crossref_exact_doi_lookup_handles_api_error(client, monkeypatch):
+    import app.main as main
+
+    def fake_crossref_fetch_detail(identifier):
+        raise RuntimeError("Crossref temporarily unavailable")
+
+    def fake_crossref_search(*args, **kwargs):
+        raise AssertionError(
+            "Exact DOI lookup must not use crossref_search"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+    monkeypatch.setattr(
+        main,
+        "crossref_search",
+        fake_crossref_search,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == (
+        "Crossref is temporarily unavailable. Please try again later."
+    )
+
+
+def test_crossref_exact_doi_lookup_rejects_mismatched_doi(
+    client, monkeypatch
+):
+    import app.main as main
+
+    paper = Paper(
+        id="10.1000/different",
+        source="crossref",
+        title="Incorrect DOI Match",
+        doi="10.1000/different",
+    )
+
+    def fake_crossref_fetch_detail(identifier):
+        assert identifier == "10.1000/example"
+        return paper
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert "Incorrect DOI Match" not in response.text
+
+
+def test_crossref_exact_doi_lookup_rejects_missing_doi(
+    client, monkeypatch
+):
+    import app.main as main
+
+    paper = Paper(
+        id="crossref-record-without-doi",
+        source="crossref",
+        title="Article Without DOI",
+        doi=None,
+    )
+
+    def fake_crossref_fetch_detail(identifier):
+        assert identifier == "10.1000/example"
+        return paper
+
+    monkeypatch.setattr(
+        main,
+        "crossref_fetch_detail",
+        fake_crossref_fetch_detail,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert "Article Without DOI" not in response.text
+

@@ -5,6 +5,9 @@ import csv
 import hashlib
 import io
 
+from app.identifiers import doi_matches, normalize_doi
+from app.doi_lookup import lookup_doi, lookup_pmid, lookup_pmcid
+
 import math
 import os
 import re
@@ -269,7 +272,7 @@ async def lifespan(app: FastAPI):
 
         try:
             if ARQ_REDIS is not None:
-                await ARQ_REDIS.close()
+                await ARQ_REDIS.aclose()
         except Exception:
             logger.exception("Failed closing ARQ_REDIS")
         ARQ_REDIS = None
@@ -1287,9 +1290,12 @@ async def _fetch_detail_by_source(source: str, pid: str) -> Paper | None:
     if source == "crossref":
         try:
             return await _run_sync(crossref_fetch_detail, pid)
-        except Exception:
+        except Exception as exc:
             logger.exception("Crossref detail failed pid=%s", pid)
-            return None
+            raise HTTPException(
+                status_code=503,
+                detail="Crossref is temporarily unavailable. Please try again later.",
+            ) from exc
 
     if source == "doaj":
         try:
@@ -1367,6 +1373,7 @@ def favicon():
 async def search(
     request: Request,
     q: str = Query("", description="Query"),
+    lookup: str = Query("", description="Exact identifier lookup mode"),
     source: str = Query("pubmed", pattern=SOURCE_PATTERN),
     n: int = Query(10, ge=1, le=50),
     page: int = Query(1, ge=1),
@@ -1392,6 +1399,26 @@ async def search(
     # Normalize inputs
     # --------------------------
     q = (q or "").strip()
+
+    if lookup == "doi" and source not in {"crossref", "all"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Exact DOI lookup is currently supported only for All Sources and Crossref.",
+        )
+
+
+    if lookup == "pmid" and source != "all":
+        raise HTTPException(
+            status_code=422,
+            detail="Exact PMID lookup is currently supported only for All Sources.",
+        )
+
+    if lookup == "pmcid" and source != "all":
+        raise HTTPException(
+            status_code=422,
+            detail="Exact PMCID lookup is currently supported only for All Sources.",
+        )
+
     mesh = _normalize_mesh(mesh)
     ui_sort = normalize_all_sources_sort(sort)
 
@@ -1421,9 +1448,206 @@ async def search(
     ss_mode, ss_api_sort = all_sources_semantic_scholar_sort_mode(ui_sort)
     epmc_sort = ui_sort
 
+
     # --------------------------
     # All Sources
     # --------------------------
+
+    if source == "all" and lookup == "pmcid":
+        pmcid = q.strip().upper()
+
+        if (
+            not pmcid.startswith("PMC")
+            or not pmcid[3:].isascii()
+            or not pmcid[3:].isdigit()
+        ):
+            result = None
+            lookup_error = "Invalid PMCID identifier."
+        else:
+            result = await lookup_pmcid(pmcid)
+            lookup_error = None
+
+        paper = result.paper if result is not None else None
+
+        papers = (
+            [_paper_to_dict(paper, source=paper.source)]
+            if paper is not None
+            else []
+        )
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="all",
+            n=n,
+            page=1,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+        ctx["source_info"] = SOURCE_SPECIALIZATIONS.get("all")
+
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": len(papers),
+                "total_pages": 1,
+                "error": lookup_error,
+                "warning": (
+                    "Exact PMCID lookup could not check these sources: "
+                    + ", ".join(result.failed_sources)
+                    if result is not None and result.failed_sources
+                    else None
+                ),
+                "previous_url": None,
+                "next_url": None,
+                "last_url": None,
+                "lookup": "pmcid",
+                "found_in": result.found_in if result else [],
+                "failed_sources": result.failed_sources if result else [],
+            }
+        )
+
+        return templates.TemplateResponse(
+            request,
+            "results.html",
+            ctx,
+        )
+
+    if source == "all" and lookup == "doi":
+        doi = normalize_doi(q)
+
+        if doi is None:
+            result = None
+            lookup_error = "Invalid DOI identifier."
+        else:
+            result = await lookup_doi(doi)
+            lookup_error = None
+
+        paper = result.paper if result is not None else None
+
+        papers = (
+            [_paper_to_dict(paper, source=paper.source)]
+            if paper is not None
+            else []
+        )
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="all",
+            n=n,
+            page=1,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+        ctx["source_info"] = SOURCE_SPECIALIZATIONS.get("all")
+
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": len(papers),
+                "total_pages": 1,
+                "error": lookup_error,
+
+                "warning": (
+                    "Exact DOI lookup could not check these sources: "
+                    + ", ".join(result.failed_sources)
+                    if result is not None and result.failed_sources
+                    else None
+                ),
+
+                "previous_url": None,
+                "next_url": None,
+                "last_url": None,
+                "lookup": "doi",
+                "found_in": result.found_in if result else [],
+                "failed_sources": result.failed_sources if result else [],
+            }
+        )
+
+        return templates.TemplateResponse(
+            request,
+            "results.html",
+            ctx,
+        )
+
+    if source == "all" and lookup == "pmid":
+        pmid = q.strip()
+
+        if not pmid or not pmid.isascii() or not pmid.isdigit():
+            result = None
+            lookup_error = "Invalid PMID identifier."
+        else:
+            result = await lookup_pmid(pmid)
+            lookup_error = None
+
+        paper = result.paper if result is not None else None
+
+        papers = (
+            [_paper_to_dict(paper, source=paper.source)]
+            if paper is not None
+            else []
+        )
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="all",
+            n=n,
+            page=1,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+        ctx["source_info"] = SOURCE_SPECIALIZATIONS.get("all")
+
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": len(papers),
+                "total_pages": 1,
+                "error": lookup_error,
+                "warning": (
+                    "Exact PMID lookup could not check these sources: "
+                    + ", ".join(result.failed_sources)
+                    if result is not None and result.failed_sources
+                    else None
+                ),
+                "previous_url": None,
+                "next_url": None,
+                "last_url": None,
+                "lookup": "pmid",
+                "found_in": result.found_in if result else [],
+                "failed_sources": result.failed_sources if result else [],
+            }
+        )
+
+        return templates.TemplateResponse(
+            request,
+            "results.html",
+            ctx,
+        )
+
     if source == "all":
         result = await build_all_source_results(
             q=q,
@@ -2305,6 +2529,78 @@ async def search(
     # CROSSREF
     # --------------------------
     if source == "crossref":
+
+        if lookup == "doi":
+            doi = normalize_doi(q)
+
+            if doi is None:
+                paper = None
+                lookup_error = "Invalid DOI identifier."
+            else:
+                try:
+                    paper = await _run_sync(crossref_fetch_detail, doi)
+                    lookup_error = None
+                except Exception:
+                    logger.exception(
+                        "Crossref DOI lookup failed doi=%s",
+                        doi,
+                    )
+                    paper = None
+                    lookup_error = (
+                        "Crossref is temporarily unavailable. "
+                        "Please try again later."
+                    )
+
+            if paper is not None and not doi_matches(doi, paper.doi):
+                logger.warning(
+                    "Crossref DOI mismatch requested=%s returned=%s",
+                    doi,
+                    paper.doi,
+                )
+                paper = None
+
+            papers = (
+                [_paper_to_dict(paper, source="crossref")] if paper is not None else []
+            )
+
+            ctx = _template_base_context(
+                request,
+                q=q,
+                source="crossref",
+                n=n,
+                page=1,
+                sort=ui_sort,
+                year_min=year_min,
+                year_max=year_max,
+                has_abstract=has_abstract,
+                mesh=mesh,
+            )
+
+            ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+            ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+
+            ctx.update(
+                {
+                    "papers": papers,
+                    "mesh_suggestions": [],
+                    "concept_suggestions": [],
+                    "total_count": len(papers),
+                    "total_pages": 1,
+                    "error": lookup_error,
+                    "warning": None,
+                    "previous_url": None,
+                    "next_url": None,
+                    "last_url": None,
+                    "lookup": "doi",
+                }
+            )
+
+            return templates.TemplateResponse(
+                request,
+                "results.html",
+                ctx,
+            )
+
         logger.info(
             "CROSSREF SEARCH request q=%r page=%s n=%s sort=%s year_min=%r year_max=%r",
             q,

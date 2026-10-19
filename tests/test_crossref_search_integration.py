@@ -133,6 +133,24 @@ def test_crossref_missing_detail_returns_404(mock_crossref_fetch_detail) -> None
     assert response.status_code == 404
 
 
+@patch("app.main.crossref_fetch_detail")
+def test_crossref_detail_api_error_returns_503(
+    mock_crossref_fetch_detail,
+) -> None:
+    import requests
+
+    mock_crossref_fetch_detail.side_effect = (
+        requests.exceptions.Timeout("Crossref request timed out")
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/paper/crossref/10.1234/example"
+        )
+
+    assert response.status_code == 503
+
+
 @patch("app.main.crossref_search")
 def test_crossref_search_renders_page_navigation(mock_crossref_search) -> None:
     mock_crossref_search.return_value = ([SAMPLE_PAPER], 50)
