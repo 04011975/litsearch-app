@@ -100,15 +100,19 @@
 <form id="search_form" action="/search" method="get" style="margin-bottom: 1rem;">
   <input name="q" value="{{ q }}" placeholder="Search query" size="50" />
 
-  <select id="lookup_mode" name="lookup" aria-label="Search mode">
-    <option value="" {% if lookup != "doi" %}selected{% endif %}>
-      Literature search
-    </option>
+<select id="lookup_mode" name="lookup" aria-label="Search mode">
+  <option value="" {% if lookup not in ["doi", "pmid"] %}selected{% endif %}>
+    Literature search
+  </option>
 
-    <option value="doi" {% if lookup == "doi" %}selected{% endif %}>
-      Exact DOI lookup (All Sources / Crossref)
-    </option>
-  </select>
+  <option value="doi" {% if lookup == "doi" %}selected{% endif %}>
+    Exact DOI lookup (All Sources / Crossref)
+  </option>
+
+  <option value="pmid" {% if lookup == "pmid" %}selected{% endif %}>
+    Exact PMID lookup (All Sources)
+  </option>
+</select>
 
   <select id="search_source" name="source">
     {% for key, info in source_specializations.items() %}

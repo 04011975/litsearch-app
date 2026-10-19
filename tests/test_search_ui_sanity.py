@@ -101,6 +101,205 @@ def test_all_sources_exact_doi_lookup_uses_central_pipeline(
     assert response.context["total_count"] == 0
 
 
+def test_all_sources_exact_pmid_lookup_uses_central_pipeline(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmidLookupResult
+
+    calls = []
+
+    async def fake_lookup_pmid(identifier):
+        calls.append(identifier)
+        return PmidLookupResult(pmid=identifier)
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": " 12345678 ",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["12345678"]
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["lookup"] == "pmid"
+
+
+def test_all_sources_exact_pmid_lookup_rejects_invalid_pmid(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_pmid(identifier):
+        raise AssertionError(
+            "Invalid PMID must not trigger central lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "ABC123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == "Invalid PMID identifier."
+    assert response.context["lookup"] == "pmid"
+
+
+def test_all_sources_exact_pmid_lookup_displays_found_paper(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmidLookupResult
+    from app.models.paper import Paper
+
+    paper = Paper(
+        id="12345678",
+        source="pubmed",
+        title="Example PMID publication",
+    )
+
+    async def fake_lookup_pmid(identifier):
+        assert identifier == "12345678"
+        return PmidLookupResult(
+            pmid=identifier,
+            paper=paper,
+            found_in=["pubmed"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "12345678",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["total_count"] == 1
+    assert len(response.context["papers"]) == 1
+    assert response.context["papers"][0]["title"] == (
+        "Example PMID publication"
+    )
+    assert response.context["found_in"] == ["pubmed"]
+    assert response.context["lookup"] == "pmid"
+
+def test_all_sources_exact_pmid_lookup_reports_failed_source(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import PmidLookupResult
+
+    async def fake_lookup_pmid(identifier):
+        assert identifier == "12345678"
+        return PmidLookupResult(
+            pmid=identifier,
+            failed_sources=["pubmed"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "12345678",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["failed_sources"] == ["pubmed"]
+    assert response.context["warning"] == (
+        "Exact PMID lookup could not check these sources: pubmed"
+    )
+    assert response.context["lookup"] == "pmid"
+
+
+def test_exact_pmid_lookup_rejects_unsupported_source(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_pmid(identifier):
+        raise AssertionError(
+            "Unsupported source must not trigger PMID lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_pmid",
+        fake_lookup_pmid,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "crossref",
+            "lookup": "pmid",
+            "q": "12345678",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Exact PMID lookup is currently supported only for All Sources."
+    )
+
+
+def test_search_interface_shows_exact_pmid_lookup_option(client):
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "pmid",
+            "q": "ABC123",
+        },
+    )
+
+    assert response.status_code == 200
+
+    html = response.text
+
+    assert "Exact PMID lookup (All Sources)" in html
+    assert 'value="pmid" selected' in html
+    assert 'value="" selected' not in html
+
+
 def test_all_sources_exact_doi_lookup_rejects_invalid_doi(
     client, monkeypatch
 ):

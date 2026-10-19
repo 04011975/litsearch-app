@@ -1439,3 +1439,262 @@ def test_lookup_doi_rejects_invalid_input_without_source_calls(
     assert result.paper is None
     assert result.found_in == []
     assert result.failed_sources == []
+
+
+def test_lookup_pubmed_pmid_exact_match(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_pubmed_pmid
+    import app.connectors.pubmed as pubmed
+
+    paper = Paper(
+        id="12345678",
+        source="pubmed",
+        title="Exact PMID Match",
+    )
+
+    async def fake_fetch_details(pmids):
+        assert pmids == ["12345678"]
+        return [paper]
+
+    monkeypatch.setattr(
+        pubmed,
+        "pubmed_fetch_details",
+        fake_fetch_details,
+    )
+
+    result = asyncio.run(
+        lookup_pubmed_pmid("12345678")
+    )
+
+    assert result is paper
+    assert result.id == "12345678"
+    assert result.source == "pubmed"
+
+
+def test_lookup_pubmed_pmid_rejects_mismatch(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_pubmed_pmid
+    import app.connectors.pubmed as pubmed
+
+    paper = Paper(
+        id="87654321",
+        source="pubmed",
+        title="Incorrect PMID Match",
+    )
+
+    async def fake_fetch_details(pmids):
+        assert pmids == ["12345678"]
+        return [paper]
+
+    monkeypatch.setattr(
+        pubmed,
+        "pubmed_fetch_details",
+        fake_fetch_details,
+    )
+
+    result = asyncio.run(
+        lookup_pubmed_pmid("12345678")
+    )
+
+    assert result is None
+
+
+def test_lookup_pubmed_pmid_not_found(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_pubmed_pmid
+    import app.connectors.pubmed as pubmed
+
+    async def fake_fetch_details(pmids):
+        assert pmids == ["12345678"]
+        return []
+
+    monkeypatch.setattr(
+        pubmed,
+        "pubmed_fetch_details",
+        fake_fetch_details,
+    )
+
+    result = asyncio.run(
+        lookup_pubmed_pmid("12345678")
+    )
+
+    assert result is None
+
+
+def test_lookup_pubmed_pmid_rejects_invalid_input(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_pubmed_pmid
+    import app.connectors.pubmed as pubmed
+
+    async def fake_fetch_details(pmids):
+        raise AssertionError(
+            "PubMed must not be called for an invalid PMID"
+        )
+
+    monkeypatch.setattr(
+        pubmed,
+        "pubmed_fetch_details",
+        fake_fetch_details,
+    )
+
+    for invalid_pmid in ["", "abc", "123abc", "12 345"]:
+        result = asyncio.run(
+            lookup_pubmed_pmid(invalid_pmid)
+        )
+
+        assert result is None
+
+
+def test_lookup_pubmed_pmid_propagates_api_error(monkeypatch):
+    import asyncio
+    import pytest
+
+    from app.doi_lookup import lookup_pubmed_pmid
+    import app.connectors.pubmed as pubmed
+
+    async def fake_fetch_details(pmids):
+        assert pmids == ["12345678"]
+        raise RuntimeError("PubMed API unavailable")
+
+    monkeypatch.setattr(
+        pubmed,
+        "pubmed_fetch_details",
+        fake_fetch_details,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="PubMed API unavailable",
+    ):
+        asyncio.run(
+            lookup_pubmed_pmid("12345678")
+        )
+
+
+def test_pmid_lookup_result_defaults():
+    from app.doi_lookup import PmidLookupResult
+
+    result = PmidLookupResult(pmid="12345678")
+
+    assert result.pmid == "12345678"
+    assert result.paper is None
+    assert result.found_in == []
+    assert result.failed_sources == []
+
+
+def test_lookup_pmid_finds_pubmed_paper(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    paper = Paper(
+        id="12345678",
+        source="pubmed",
+        title="Exact PMID Match",
+    )
+
+    async def fake_lookup_pubmed_pmid(pmid):
+        assert pmid == "12345678"
+        return paper
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_pubmed_pmid",
+        fake_lookup_pubmed_pmid,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmid("12345678")
+    )
+
+    assert result.pmid == "12345678"
+    assert result.paper is paper
+    assert result.found_in == ["pubmed"]
+    assert result.failed_sources == []
+
+
+def test_lookup_pmid_not_found(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    async def fake_lookup_pubmed_pmid(pmid):
+        assert pmid == "12345678"
+        return None
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_pubmed_pmid",
+        fake_lookup_pubmed_pmid,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmid("12345678")
+    )
+
+    assert result.pmid == "12345678"
+    assert result.paper is None
+    assert result.found_in == []
+    assert result.failed_sources == []
+
+
+def test_lookup_pmid_records_pubmed_api_error(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    async def fake_lookup_pubmed_pmid(pmid):
+        assert pmid == "12345678"
+        raise RuntimeError("PubMed API unavailable")
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_pubmed_pmid",
+        fake_lookup_pubmed_pmid,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmid("12345678")
+    )
+
+    assert result.pmid == "12345678"
+    assert result.paper is None
+    assert result.found_in == []
+    assert result.failed_sources == ["pubmed"]
+
+
+def test_lookup_pmid_rejects_invalid_input(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    async def fake_lookup_pubmed_pmid(pmid):
+        raise AssertionError(
+            "PubMed must not be called for an invalid PMID"
+        )
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_pubmed_pmid",
+        fake_lookup_pubmed_pmid,
+    )
+
+    for invalid_pmid in [
+        "",
+        "abc",
+        "123abc",
+        "12 345",
+        "１２３４５",
+    ]:
+        result = asyncio.run(
+            doi_lookup.lookup_pmid(invalid_pmid)
+        )
+
+        assert result.pmid == ""
+        assert result.paper is None
+        assert result.found_in == []
+        assert result.failed_sources == []

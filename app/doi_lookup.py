@@ -16,6 +16,16 @@ class DoiLookupResult:
     failed_sources: list[str] = field(default_factory=list)
 
 
+@dataclass
+class PmidLookupResult:
+    """Result of an exact PMID lookup across literature sources."""
+
+    pmid: str
+    paper: Paper | None = None
+    found_in: list[str] = field(default_factory=list)
+    failed_sources: list[str] = field(default_factory=list)
+
+
 async def lookup_crossref_doi(doi: str) -> Paper | None:
     """Retrieve a Crossref paper only when its DOI matches exactly."""
     from app.connectors.crossref import crossref_fetch_detail
@@ -55,6 +65,24 @@ async def lookup_pubmed_doi(doi: str) -> Paper | None:
 
     for paper in papers:
         if doi_matches(normalized_doi, paper.doi):
+            return paper
+
+    return None
+
+
+async def lookup_pubmed_pmid(pmid: str) -> Paper | None:
+    """Retrieve a PubMed paper only when its PMID matches exactly."""
+    from app.connectors.pubmed import pubmed_fetch_details
+
+    normalized_pmid = str(pmid or "").strip()
+
+    if not normalized_pmid or not normalized_pmid.isdigit():
+        return None
+
+    papers = await pubmed_fetch_details([normalized_pmid])
+
+    for paper in papers:
+        if paper.source == "pubmed" and str(paper.id) == normalized_pmid:
             return paper
 
     return None
@@ -283,5 +311,28 @@ async def lookup_doi(doi: str) -> DoiLookupResult:
 
         if result.paper is None:
             result.paper = paper
+
+    return result
+
+
+async def lookup_pmid(pmid: str) -> PmidLookupResult:
+    """Look up an exact PMID across supported literature sources."""
+    normalized_pmid = str(pmid or "").strip()
+
+    if not normalized_pmid or not normalized_pmid.isascii() or not normalized_pmid.isdigit():
+        return PmidLookupResult(pmid="")
+
+    result = PmidLookupResult(pmid=normalized_pmid)
+
+    try:
+        paper = await lookup_pubmed_pmid(normalized_pmid)
+    except Exception:
+        result.failed_sources.append("pubmed")
+        return result
+
+    if paper is not None:
+        if paper.source == "pubmed" and str(paper.id) == normalized_pmid:
+            result.paper = paper
+            result.found_in.append("pubmed")
 
     return result
