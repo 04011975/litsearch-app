@@ -1698,3 +1698,437 @@ def test_lookup_pmid_rejects_invalid_input(monkeypatch):
         assert result.paper is None
         assert result.found_in == []
         assert result.failed_sources == []
+
+
+def test_lookup_europe_pmc_pmcid_exact_match(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    from app.models.paper import Paper
+    import app.connectors.europe_pmc as europe_pmc
+
+    paper = Paper(
+        id="12345678",
+        source="europe_pmc",
+        title="Exact PMCID Match",
+        pmcid="PMC1234567",
+    )
+
+    def fake_fetch_detail(pid, *, raise_on_error=False):
+        assert pid == "PMC1234567"
+        assert raise_on_error is True
+        return paper
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    result = asyncio.run(
+        lookup_europe_pmc_pmcid("PMC1234567")
+    )
+
+    assert result is paper
+    assert result.pmcid == "PMC1234567"
+
+
+def test_lookup_europe_pmc_pmcid_rejects_mismatch(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    from app.models.paper import Paper
+    import app.connectors.europe_pmc as europe_pmc
+
+    paper = Paper(
+        id="12345678",
+        source="europe_pmc",
+        title="Incorrect PMCID Match",
+        pmcid="PMC9999999",
+    )
+
+    def fake_fetch_detail(pid, *, raise_on_error=False):
+        assert pid == "PMC1234567"
+        assert raise_on_error is True
+        return paper
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    result = asyncio.run(
+        lookup_europe_pmc_pmcid("PMC1234567")
+    )
+
+    assert result is None
+
+
+def test_lookup_europe_pmc_pmcid_rejects_wrong_source(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    from app.models.paper import Paper
+    import app.connectors.europe_pmc as europe_pmc
+
+    paper = Paper(
+        id="12345678",
+        source="crossref",
+        title="Incorrect Source",
+        pmcid="PMC1234567",
+    )
+
+    def fake_fetch_detail(pid, *, raise_on_error=False):
+        assert pid == "PMC1234567"
+        assert raise_on_error is True
+        return paper
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    result = asyncio.run(
+        lookup_europe_pmc_pmcid("PMC1234567")
+    )
+
+    assert result is None
+
+
+def test_lookup_europe_pmc_pmcid_rejects_missing_pmcid(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    from app.models.paper import Paper
+    import app.connectors.europe_pmc as europe_pmc
+
+    paper = Paper(
+        id="12345678",
+        source="europe_pmc",
+        title="Missing PMCID",
+        pmcid=None,
+    )
+
+    def fake_fetch_detail(pid, *, raise_on_error=False):
+        assert pid == "PMC1234567"
+        assert raise_on_error is True
+        return paper
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    result = asyncio.run(
+        lookup_europe_pmc_pmcid("PMC1234567")
+    )
+
+    assert result is None
+
+
+def test_lookup_europe_pmc_pmcid_rejects_invalid_input(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    import app.connectors.europe_pmc as europe_pmc
+
+    def fake_fetch_detail(pid):
+        raise AssertionError(
+            "Europe PMC must not be called for invalid PMCID input"
+        )
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    invalid_pmcids = [
+        "",
+        " ",
+        "1234567",
+        "PMC",
+        "PMCABC",
+        "PMC123ABC",
+        "PMC123 456",
+        "PMC-1234567",
+        "PMC１２３４５６７",
+    ]
+
+    for pmcid in invalid_pmcids:
+        result = asyncio.run(
+            lookup_europe_pmc_pmcid(pmcid)
+        )
+
+        assert result is None
+
+
+def test_lookup_europe_pmc_pmcid_not_found(monkeypatch):
+    import asyncio
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    import app.connectors.europe_pmc as europe_pmc
+
+    def fake_fetch_detail(pid, *, raise_on_error=False):
+        assert pid == "PMC1234567"
+        assert raise_on_error is True
+        return None
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    result = asyncio.run(
+        lookup_europe_pmc_pmcid("PMC1234567")
+    )
+
+    assert result is None
+
+
+def test_lookup_europe_pmc_pmcid_propagates_fetch_error(monkeypatch):
+    import asyncio
+
+    import pytest
+
+    from app.doi_lookup import lookup_europe_pmc_pmcid
+    import app.connectors.europe_pmc as europe_pmc
+
+    def fake_fetch_detail(pid, *, raise_on_error=False):
+        assert pid == "PMC1234567"
+        assert raise_on_error is True
+        raise RuntimeError("Europe PMC API unavailable")
+
+    monkeypatch.setattr(
+        europe_pmc,
+        "europe_pmc_fetch_detail",
+        fake_fetch_detail,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Europe PMC API unavailable",
+    ):
+        asyncio.run(
+            lookup_europe_pmc_pmcid("PMC1234567")
+        )
+
+
+def test_europe_pmc_fetch_detail_raises_on_api_error(monkeypatch):
+    import pytest
+    import requests
+
+    import app.connectors.europe_pmc as europe_pmc
+
+    def fake_get(*args, **kwargs):
+        raise requests.exceptions.ConnectionError(
+            "Europe PMC API unavailable"
+        )
+
+    monkeypatch.setattr(
+        europe_pmc.requests,
+        "get",
+        fake_get,
+    )
+
+    with pytest.raises(
+        requests.exceptions.ConnectionError,
+        match="Europe PMC API unavailable",
+    ):
+        europe_pmc.europe_pmc_fetch_detail(
+            "PMC1234567",
+            raise_on_error=True,
+        )
+
+
+def test_europe_pmc_fetch_detail_suppresses_api_error_by_default(monkeypatch):
+    import requests
+
+    import app.connectors.europe_pmc as europe_pmc
+
+    def fake_get(*args, **kwargs):
+        raise requests.exceptions.ConnectionError(
+            "Europe PMC API unavailable"
+        )
+
+    monkeypatch.setattr(
+        europe_pmc.requests,
+        "get",
+        fake_get,
+    )
+
+    result = europe_pmc.europe_pmc_fetch_detail(
+        "PMC1234567"
+    )
+
+    assert result is None
+
+
+def test_pmcid_lookup_result_defaults():
+    from app.doi_lookup import PmcidLookupResult
+
+    result = PmcidLookupResult(pmcid="PMC1234567")
+
+    assert result.pmcid == "PMC1234567"
+    assert result.paper is None
+    assert result.found_in == []
+    assert result.failed_sources == []
+
+
+def test_lookup_pmcid_found_in_europe_pmc(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+    from app.models.paper import Paper
+
+    paper = Paper(
+        id="12345678",
+        source="europe_pmc",
+        title="Exact PMCID Match",
+        pmcid="PMC1234567",
+    )
+
+    async def fake_lookup(pmcid):
+        assert pmcid == "PMC1234567"
+        return paper
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_europe_pmc_pmcid",
+        fake_lookup,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmcid("PMC1234567")
+    )
+
+    assert result.pmcid == "PMC1234567"
+    assert result.paper is paper
+    assert result.found_in == ["europe_pmc"]
+    assert result.failed_sources == []
+
+
+def test_lookup_pmcid_not_found(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    async def fake_lookup(pmcid):
+        assert pmcid == "PMC1234567"
+        return None
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_europe_pmc_pmcid",
+        fake_lookup,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmcid("PMC1234567")
+    )
+
+    assert result.pmcid == "PMC1234567"
+    assert result.paper is None
+    assert result.found_in == []
+    assert result.failed_sources == []
+
+
+def test_lookup_pmcid_records_europe_pmc_failure(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    async def fake_lookup(pmcid):
+        assert pmcid == "PMC1234567"
+        raise RuntimeError("Europe PMC API unavailable")
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_europe_pmc_pmcid",
+        fake_lookup,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmcid("PMC1234567")
+    )
+
+    assert result.pmcid == "PMC1234567"
+    assert result.paper is None
+    assert result.found_in == []
+    assert result.failed_sources == ["europe_pmc"]
+
+
+def test_lookup_pmcid_rejects_invalid_input(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+
+    async def fake_lookup(pmcid):
+        raise AssertionError(
+            "Europe PMC must not be called for invalid PMCID input"
+        )
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_europe_pmc_pmcid",
+        fake_lookup,
+    )
+
+    invalid_pmcids = [
+        "",
+        " ",
+        "1234567",
+        "PMC",
+        "PMCABC",
+        "PMC123ABC",
+        "PMC123 456",
+        "PMC-1234567",
+        "PMC１２３４５６７",
+    ]
+
+    for pmcid in invalid_pmcids:
+        result = asyncio.run(
+            doi_lookup.lookup_pmcid(pmcid)
+        )
+
+        assert result.pmcid == ""
+        assert result.paper is None
+        assert result.found_in == []
+        assert result.failed_sources == []
+
+
+def test_lookup_pmcid_normalizes_input(monkeypatch):
+    import asyncio
+
+    import app.doi_lookup as doi_lookup
+    from app.models.paper import Paper
+
+    paper = Paper(
+        id="12345678",
+        source="europe_pmc",
+        title="Normalized PMCID Match",
+        pmcid="PMC1234567",
+    )
+
+    async def fake_lookup(pmcid):
+        assert pmcid == "PMC1234567"
+        return paper
+
+    monkeypatch.setattr(
+        doi_lookup,
+        "lookup_europe_pmc_pmcid",
+        fake_lookup,
+    )
+
+    result = asyncio.run(
+        doi_lookup.lookup_pmcid("  pmc1234567  ")
+    )
+
+    assert result.pmcid == "PMC1234567"
+    assert result.paper is paper
+    assert result.found_in == ["europe_pmc"]
+    assert result.failed_sources == []

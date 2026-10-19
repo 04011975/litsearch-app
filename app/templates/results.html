@@ -101,7 +101,7 @@
   <input name="q" value="{{ q }}" placeholder="Search query" size="50" />
 
 <select id="lookup_mode" name="lookup" aria-label="Search mode">
-  <option value="" {% if lookup not in ["doi", "pmid"] %}selected{% endif %}>
+  <option value="" {% if lookup not in ["doi", "pmid", "pmcid"] %}selected{% endif %}>
     Literature search
   </option>
 
@@ -111,6 +111,10 @@
 
   <option value="pmid" {% if lookup == "pmid" %}selected{% endif %}>
     Exact PMID lookup (All Sources)
+  </option>
+
+  <option value="pmcid" {% if lookup == "pmcid" %}selected{% endif %}>
+    Exact PMCID lookup (All Sources)
   </option>
 </select>
 

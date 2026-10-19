@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 from app.identifiers import doi_matches, normalize_doi
 from app.models.paper import Paper
-
 
 @dataclass
 class DoiLookupResult:
@@ -21,6 +21,16 @@ class PmidLookupResult:
     """Result of an exact PMID lookup across literature sources."""
 
     pmid: str
+    paper: Paper | None = None
+    found_in: list[str] = field(default_factory=list)
+    failed_sources: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PmcidLookupResult:
+    """Result of an exact PMCID lookup across literature sources."""
+
+    pmcid: str
     paper: Paper | None = None
     found_in: list[str] = field(default_factory=list)
     failed_sources: list[str] = field(default_factory=list)
@@ -334,5 +344,67 @@ async def lookup_pmid(pmid: str) -> PmidLookupResult:
         if paper.source == "pubmed" and str(paper.id) == normalized_pmid:
             result.paper = paper
             result.found_in.append("pubmed")
+
+    return result
+
+
+async def lookup_europe_pmc_pmcid(pmcid: str) -> Paper | None:
+    """Retrieve a Europe PMC paper only when its PMCID matches exactly."""
+    from app.connectors.europe_pmc import europe_pmc_fetch_detail
+
+    normalized_pmcid = str(pmcid or "").strip().upper()
+
+    if (
+        not normalized_pmcid.startswith("PMC")
+        or not normalized_pmcid[3:].isascii()
+        or not normalized_pmcid[3:].isdigit()
+    ):
+        return None
+
+    paper = await asyncio.to_thread(
+        europe_pmc_fetch_detail,
+        normalized_pmcid,
+        raise_on_error=True,
+    )
+
+    if paper is None:
+        return None
+
+    if (
+        paper.source == "europe_pmc"
+        and str(paper.pmcid or "").strip().upper() == normalized_pmcid
+    ):
+        return paper
+
+    return None
+
+
+async def lookup_pmcid(pmcid: str) -> PmcidLookupResult:
+    """Look up an exact PMCID across supported literature sources."""
+    normalized_pmcid = str(pmcid or "").strip().upper()
+
+    if (
+        not normalized_pmcid.startswith("PMC")
+        or not normalized_pmcid[3:].isascii()
+        or not normalized_pmcid[3:].isdigit()
+    ):
+        return PmcidLookupResult(pmcid="")
+
+    result = PmcidLookupResult(pmcid=normalized_pmcid)
+
+    try:
+        paper = await lookup_europe_pmc_pmcid(normalized_pmcid)
+    except Exception:
+        result.failed_sources.append("europe_pmc")
+        return result
+
+    if paper is not None:
+        if (
+            paper.source == "europe_pmc"
+            and str(paper.pmcid or "").strip().upper()
+            == normalized_pmcid
+        ):
+            result.paper = paper
+            result.found_in.append("europe_pmc")
 
     return result
