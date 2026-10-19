@@ -20,6 +20,7 @@ def test_homepage_offers_exact_doi_lookup(client):
     assert 'value="crossref"' in response.text
     assert 'name="lookup"' in response.text
     assert 'value="doi"' in response.text
+    assert "Exact DOI lookup (All Sources / Crossref)" in response.text
 
 
 def test_crossref_doi_lookup_preserves_search_mode(client, monkeypatch):
@@ -59,6 +60,169 @@ def test_exact_doi_lookup_rejects_unsupported_source(client):
     )
 
     assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Exact DOI lookup is currently supported only for All Sources and Crossref."
+    )
+
+
+def test_all_sources_exact_doi_lookup_uses_central_pipeline(
+    client, monkeypatch
+):
+    import app.main as main
+
+    calls = []
+
+    async def fake_lookup_doi(identifier):
+        calls.append(identifier)
+
+        from app.doi_lookup import DoiLookupResult
+
+        return DoiLookupResult(doi=identifier)
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+        raising=False,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "https://doi.org/10.1000/Example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["10.1000/example"]
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+
+
+def test_all_sources_exact_doi_lookup_rejects_invalid_doi(
+    client, monkeypatch
+):
+    import app.main as main
+
+    async def fake_lookup_doi(identifier):
+        raise AssertionError(
+            "Invalid DOI must not trigger central lookup"
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "not-a-valid-doi",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["papers"] == []
+    assert response.context["total_count"] == 0
+    assert response.context["error"] == "Invalid DOI identifier."
+
+
+def test_all_sources_exact_doi_lookup_displays_found_paper(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import DoiLookupResult
+
+    paper = Paper(
+        id="10.1000/example",
+        source="pubmed",
+        title="All Sources Exact DOI Test Article",
+        doi="10.1000/example",
+    )
+
+    async def fake_lookup_doi(identifier):
+        assert identifier == "10.1000/example"
+
+        return DoiLookupResult(
+            doi=identifier,
+            paper=paper,
+            found_in=["pubmed", "crossref"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "https://doi.org/10.1000/Example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "All Sources Exact DOI Test Article" in response.text
+    assert response.context["total_count"] == 1
+    assert len(response.context["papers"]) == 1
+    assert response.context["found_in"] == ["pubmed", "crossref"]
+
+
+def test_all_sources_exact_doi_lookup_preserves_failed_sources(
+    client, monkeypatch
+):
+    import app.main as main
+    from app.doi_lookup import DoiLookupResult
+
+    paper = Paper(
+        id="10.1000/example",
+        source="pubmed",
+        title="DOI Lookup With Partial Source Failure",
+        doi="10.1000/example",
+    )
+
+    async def fake_lookup_doi(identifier):
+        assert identifier == "10.1000/example"
+
+        return DoiLookupResult(
+            doi=identifier,
+            paper=paper,
+            found_in=["pubmed", "crossref"],
+            failed_sources=["semantic_scholar"],
+        )
+
+    monkeypatch.setattr(
+        main,
+        "lookup_doi",
+        fake_lookup_doi,
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "doi",
+            "q": "10.1000/example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["total_count"] == 1
+    assert response.context["found_in"] == ["pubmed", "crossref"]
+    assert response.context["failed_sources"] == ["semantic_scholar"]
+    assert "DOI Lookup With Partial Source Failure" in response.text
+    assert response.context["warning"] == (
+        "Exact DOI lookup could not check these sources: semantic_scholar"
+    )
+    assert "Exact DOI lookup could not check these sources: semantic_scholar" in response.text
 
 
 def test_template_context_exposes_semantic_scholar_last_capability(client):

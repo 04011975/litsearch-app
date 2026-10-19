@@ -6,6 +6,7 @@ import hashlib
 import io
 
 from app.identifiers import doi_matches, normalize_doi
+from app.doi_lookup import lookup_doi
 
 import math
 import os
@@ -1399,10 +1400,10 @@ async def search(
     # --------------------------
     q = (q or "").strip()
 
-    if lookup == "doi" and source != "crossref":
+    if lookup == "doi" and source not in {"crossref", "all"}:
         raise HTTPException(
             status_code=422,
-            detail="Exact DOI lookup is currently supported only for Crossref.",
+            detail="Exact DOI lookup is currently supported only for All Sources and Crossref.",
         )
 
     mesh = _normalize_mesh(mesh)
@@ -1437,6 +1438,72 @@ async def search(
     # --------------------------
     # All Sources
     # --------------------------
+    if source == "all" and lookup == "doi":
+        doi = normalize_doi(q)
+
+        if doi is None:
+            result = None
+            lookup_error = "Invalid DOI identifier."
+        else:
+            result = await lookup_doi(doi)
+            lookup_error = None
+
+        paper = result.paper if result is not None else None
+
+        papers = (
+            [_paper_to_dict(paper, source=paper.source)]
+            if paper is not None
+            else []
+        )
+
+        ctx = _template_base_context(
+            request,
+            q=q,
+            source="all",
+            n=n,
+            page=1,
+            sort=ui_sort,
+            year_min=year_min,
+            year_max=year_max,
+            has_abstract=has_abstract,
+            mesh=mesh,
+        )
+
+        ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+        ctx["source_info"] = SOURCE_SPECIALIZATIONS.get("all")
+
+        ctx.update(
+            {
+                "papers": papers,
+                "mesh_suggestions": [],
+                "concept_suggestions": [],
+                "total_count": len(papers),
+                "total_pages": 1,
+                "error": lookup_error,
+
+                "warning": (
+                    "Exact DOI lookup could not check these sources: "
+                    + ", ".join(result.failed_sources)
+                    if result is not None and result.failed_sources
+                    else None
+                ),
+
+                "previous_url": None,
+                "next_url": None,
+                "last_url": None,
+                "lookup": "doi",
+                "found_in": result.found_in if result else [],
+                "failed_sources": result.failed_sources if result else [],
+            }
+        )
+
+        return templates.TemplateResponse(
+            request,
+            "results.html",
+            ctx,
+        )
+
+
     if source == "all":
         result = await build_all_source_results(
             q=q,
