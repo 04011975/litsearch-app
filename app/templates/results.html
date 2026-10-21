@@ -100,22 +100,25 @@
 <form id="search_form" action="/search" method="get" style="margin-bottom: 1rem;">
   <input name="q" value="{{ q }}" placeholder="Search query" size="50" />
 
-<select id="lookup_mode" name="lookup" aria-label="Search mode">
-  <option value="" {% if lookup not in ["doi", "pmid", "pmcid"] %}selected{% endif %}>
-    Literature search
+<select id="search_mode" aria-label="Search mode">
+  <option value="literature"
+    {% if lookup not in ["doi", "pmid", "pmcid"] %}selected{% endif %}>
+    Literature Search
   </option>
 
-  <option value="doi" {% if lookup == "doi" %}selected{% endif %}>
-    Exact DOI lookup (All Sources)
+  <option value="identifier"
+    {% if lookup in ["doi", "pmid", "pmcid"] %}selected{% endif %}>
+    Identifier Lookup
   </option>
+</select>
 
-  <option value="pmid" {% if lookup == "pmid" %}selected{% endif %}>
-    Exact PMID lookup (All Sources)
-  </option>
-
-  <option value="pmcid" {% if lookup == "pmcid" %}selected{% endif %}>
-    Exact PMCID lookup (All Sources)
-  </option>
+<select id="lookup_mode"
+        name="lookup"
+        aria-label="Identifier type"
+        {% if lookup not in ["doi", "pmid", "pmcid"] %}hidden disabled{% endif %}>
+  <option value="doi" {% if lookup == "doi" %}selected{% endif %}>DOI</option>
+  <option value="pmid" {% if lookup == "pmid" %}selected{% endif %}>PMID</option>
+  <option value="pmcid" {% if lookup == "pmcid" %}selected{% endif %}>PMCID</option>
 </select>
 
   <select id="search_source" name="source">
@@ -718,10 +721,11 @@
   const form = document.getElementById("search_form");
   if (!form) return;
 
+  const searchMode = document.getElementById("search_mode");
   const lookupMode = document.getElementById("lookup_mode");
   const sourceSelect = document.getElementById("search_source");
 
-  if (!lookupMode || !sourceSelect) return;
+  if (!searchMode || !lookupMode || !sourceSelect) return;
 
   const filterNames = [
     "n",
@@ -743,8 +747,10 @@
   });
 
   function updateLookupMode() {
+    const isIdentifierLookup = searchMode.value === "identifier";
 
-    const isIdentifierLookup = ["doi", "pmid", "pmcid"].includes(lookupMode.value);
+    lookupMode.hidden = !isIdentifierLookup;
+    lookupMode.disabled = !isIdentifierLookup;
 
     if (isIdentifierLookup) {
       sourceSelect.value = "all";
@@ -754,6 +760,7 @@
 
     filterNames.forEach(function (name) {
       const field = form.elements.namedItem(name);
+
       if (field) {
         field.disabled = isIdentifierLookup
           ? true
@@ -762,13 +769,16 @@
     });
   }
 
-  lookupMode.addEventListener("change", updateLookupMode);
+  searchMode.addEventListener("change", updateLookupMode);
   updateLookupMode();
 
   form.addEventListener("submit", function () {
-    if (["doi", "pmid", "pmcid"].includes(lookupMode.value)) {
+    if (searchMode.value === "identifier") {
+      lookupMode.disabled = false;
       sourceSelect.disabled = false;
       sourceSelect.value = "all";
+    } else {
+      lookupMode.disabled = true;
     }
   });
 })();

@@ -20,7 +20,10 @@ def test_homepage_offers_exact_doi_lookup(client):
     assert 'value="crossref"' in response.text
     assert 'name="lookup"' in response.text
     assert 'value="doi"' in response.text
-    assert "Exact DOI lookup (All Sources)" in response.text
+    assert 'id="search_mode"' in response.text
+    assert 'value="identifier"' in response.text
+    assert 'id="lookup_mode"' in response.text
+    assert 'value="doi"' in response.text
 
 
 def test_exact_doi_lookup_rejects_unsupported_source(client):
@@ -452,7 +455,11 @@ def test_search_interface_shows_exact_pmid_lookup_option(client):
 
     html = response.text
 
-    assert "Exact PMID lookup (All Sources)" in html
+    assert 'value="identifier"' in html
+    assert re.search(
+        r'<option[^>]*value="pmid"[^>]*selected',
+        html,
+    )
     assert 'value="pmid" selected' in html
     assert 'value="" selected' not in html
 
@@ -471,7 +478,11 @@ def test_search_interface_shows_exact_pmcid_lookup_option(client):
 
     html = response.text
 
-    assert "Exact PMCID lookup (All Sources)" in html
+    assert 'value="identifier"' in html
+    assert re.search(
+        r'<option[^>]*value="pmcid"[^>]*selected',
+        html,
+    )
     assert 'value="pmcid" selected' in html
     assert (
         html.index('<select id="lookup_mode"')
