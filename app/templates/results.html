@@ -106,7 +106,7 @@
   </option>
 
   <option value="doi" {% if lookup == "doi" %}selected{% endif %}>
-    Exact DOI lookup (All Sources / Crossref)
+    Exact DOI lookup (All Sources)
   </option>
 
   <option value="pmid" {% if lookup == "pmid" %}selected{% endif %}>
@@ -743,18 +743,19 @@
   });
 
   function updateLookupMode() {
-    const isDoiLookup = lookupMode.value === "doi";
 
-    if (isDoiLookup) {
-      sourceSelect.value = "crossref";
+    const isIdentifierLookup = ["doi", "pmid", "pmcid"].includes(lookupMode.value);
+
+    if (isIdentifierLookup) {
+      sourceSelect.value = "all";
     }
 
-    sourceSelect.disabled = isDoiLookup;
+    sourceSelect.disabled = isIdentifierLookup;
 
     filterNames.forEach(function (name) {
       const field = form.elements.namedItem(name);
       if (field) {
-        field.disabled = isDoiLookup
+        field.disabled = isIdentifierLookup
           ? true
           : originalDisabled.get(name);
       }
@@ -765,9 +766,9 @@
   updateLookupMode();
 
   form.addEventListener("submit", function () {
-    if (lookupMode.value === "doi") {
+    if (["doi", "pmid", "pmcid"].includes(lookupMode.value)) {
       sourceSelect.disabled = false;
-      sourceSelect.value = "crossref";
+      sourceSelect.value = "all";
     }
   });
 })();

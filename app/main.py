@@ -390,16 +390,22 @@ SOURCE_SPECIALIZATIONS = {
     "all": {
         "label": "All sources",
         "role": "Multi-source literature retrieval",
-        "specialization": "Combined export across PubMed, Europe PMC, OpenAlex, and Semantic Scholar.",
-        "search_mode": "Multi-source export mode. Browser search results are not combined yet.",
+        "specialization": (
+            "Combined literature search across PubMed, Europe PMC, "
+            "OpenAlex, Crossref, DOAJ, and Semantic Scholar."
+        ),
+        "search_mode": (
+            "Federated literature search with combined browser results "
+            "and export functionality."
+        ),
         "strengths": [
-            "broader coverage across multiple scholarly databases",
-            "cross-source deduplication during export",
-            "single export workflow",
+            "broader coverage across six scholarly databases",
+            "cross-source deduplication of retrieved records",
+            "combined browser results and export workflow",
         ],
         "limitations": [
-            "currently available for async export only",
-            "browser result listing is not yet combined",
+            "source-specific search capabilities and filters vary",
+            "coverage depends on source availability and API limits",
         ],
     },
 }
@@ -1400,12 +1406,11 @@ async def search(
     # --------------------------
     q = (q or "").strip()
 
-    if lookup == "doi" and source not in {"crossref", "all"}:
+    if lookup == "doi" and source != "all":
         raise HTTPException(
             status_code=422,
-            detail="Exact DOI lookup is currently supported only for All Sources and Crossref.",
+            detail="Exact DOI lookup is currently supported only for All Sources.",
         )
-
 
     if lookup == "pmid" and source != "all":
         raise HTTPException(
