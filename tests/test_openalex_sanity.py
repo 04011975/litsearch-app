@@ -133,6 +133,55 @@ def test_openalex_search_passes_has_abstract_filter(monkeypatch):
     )
 
 
+
+def test_openalex_search_title_only_uses_title_filter(monkeypatch):
+    captured_params = {}
+
+    class FakeResponse:
+        status_code = 200
+        url = "https://api.openalex.org/works"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "meta": {"count": 0},
+                "results": [],
+            }
+
+    def fake_get(*args, **kwargs):
+        captured_params.update(kwargs.get("params") or {})
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.connectors.openalex.requests.get",
+        fake_get,
+    )
+
+    papers, total = openalex_search(
+        "Machine Learning in Cancer",
+        page=1,
+        n=10,
+        year_min=2020,
+        year_max=2025,
+        has_abstract=True,
+        title_only=True,
+    )
+
+    assert papers == []
+    assert total == 0
+
+    assert "search" not in captured_params
+
+    assert captured_params["filter"] == (
+        "from_publication_date:2020-01-01,"
+        "to_publication_date:2025-12-31,"
+        "has_abstract:true,"
+        "title.search:Machine Learning in Cancer"
+    )
+
+
 def test_openalex_search_retries_after_429(monkeypatch):
     calls = []
 

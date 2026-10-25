@@ -61,6 +61,35 @@ def test_build_epmc_query_supports_mesh_and_mode():
     assert query == '(cancer) AND (MESH:"Humans" AND MESH:"Adolescent")'
 
 
+def test_build_epmc_query_title_only():
+    from app.connectors.europe_pmc import _build_epmc_query
+
+    query = _build_epmc_query(
+        "Machine Learning in Cancer",
+        title_only=True,
+    )
+
+    assert query == '(TITLE:"Machine Learning in Cancer")'
+
+
+def test_build_epmc_query_title_only_with_filters():
+    from app.connectors.europe_pmc import _build_epmc_query
+
+    query = _build_epmc_query(
+        "Machine Learning in Cancer",
+        title_only=True,
+        year_min=2020,
+        year_max=2025,
+        has_abstract=1,
+    )
+
+    assert query == (
+        '(TITLE:"Machine Learning in Cancer") '
+        'AND PUB_YEAR:[2020 TO 2025] '
+        'AND HAS_ABSTRACT:Y'
+    )
+
+
 def test_europe_pmc_search_accepts_mesh_mode():
     import inspect
 

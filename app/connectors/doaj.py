@@ -189,6 +189,7 @@ def doaj_search(
     year_min: int | None = None,
     year_max: int | None = None,
     has_abstract: bool = False,
+    title_only: bool = False,
 ) -> tuple[list[Paper], int]:
     """
     Search DOAJ articles and normalize results to canonical Paper objects.
@@ -217,10 +218,10 @@ def doaj_search(
     if has_abstract:
         filters.append("_exists_:bibjson.abstract")
 
-    search_query = q
+    search_query = f'bibjson.title:"{q}"' if title_only else q
 
     if filters:
-        search_query = f"({q}) AND " + " AND ".join(filters)
+        search_query = f"({search_query}) AND " + " AND ".join(filters)
 
     url = f"{BASE_URL}/{requests.utils.quote(search_query, safe='')}"
 

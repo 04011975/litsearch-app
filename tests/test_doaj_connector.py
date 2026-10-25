@@ -184,6 +184,26 @@ def test_doaj_search_maps_response(mock_get: Mock) -> None:
 
 
 @patch("app.connectors.doaj.requests.get")
+def test_doaj_search_title_only_uses_title_field(mock_get: Mock) -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "total": 0,
+        "results": [],
+    }
+    mock_get.return_value = response
+
+    doaj_search(
+        "Machine Learning in Cancer",
+        title_only=True,
+    )
+
+    url = unquote(mock_get.call_args.args[0])
+
+    assert 'bibjson.title:"Machine Learning in Cancer"' in url
+
+
+@patch("app.connectors.doaj.requests.get")
 def test_doaj_search_applies_year_min_server_side(mock_get: Mock) -> None:
     response = Mock()
     response.status_code = 200

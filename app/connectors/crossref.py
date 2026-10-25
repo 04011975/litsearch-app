@@ -128,6 +128,7 @@ def crossref_search(
     year_min: Optional[int] = None,
     year_max: Optional[int] = None,
     has_abstract: bool = False,
+    title_only: bool = False,
 ) -> Tuple[List[Paper], int]:
     q = (q or "").strip()
 
@@ -140,7 +141,7 @@ def crossref_search(
     offset = (page - 1) * n
 
     params = {
-        "query": q,
+        "query.title" if title_only else "query": q,
         "rows": n,
         "offset": offset,
     }

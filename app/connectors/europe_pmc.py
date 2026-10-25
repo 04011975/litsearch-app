@@ -109,12 +109,14 @@ def _build_epmc_query(
     has_abstract: int = 0,
     mesh: str = "",
     mesh_mode: str = "or",
+    title_only: bool = False,
 ) -> str:
     q = (q or "").strip()
     if not q:
         return ""
 
-    parts: list[str] = [f"({q})"]
+    search_term = f'TITLE:"{q}"' if title_only else q
+    parts: list[str] = [f"({search_term})"]
 
     try:
         y_min = int(year_min) if year_min not in (None, "") else None
@@ -197,6 +199,7 @@ def europe_pmc_search(
     has_abstract: int = 0,
     mesh: str = "",
     mesh_mode: str = "or",
+    title_only: bool = False,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     retries: int = 2,
 ) -> tuple[list[Paper], int, Optional[str]]:
@@ -211,6 +214,7 @@ def europe_pmc_search(
         has_abstract=has_abstract,
         mesh=mesh,
         mesh_mode=mesh_mode,
+        title_only=title_only,
     )
     if not epmc_query:
         return [], 0, None

@@ -178,6 +178,7 @@ async def fetch_all_source_candidates(
     ncbi_api_key: str | None = None,
     tool_name: str | None = None,
     contact_email: str | None = None,
+    title_only: bool = False,
 ) -> dict[str, Any]:
     """
     Fetch raw All Sources candidates from each primary source.
@@ -199,8 +200,22 @@ async def fetch_all_source_candidates(
         source = "pubmed"
 
         try:
+            if title_only:
+                stopwords = {"a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "the", "to", "with"}
+                import re
+
+                words = re.findall(r"[^\W_]+(?:[-'][^\W_]+)*", q, flags=re.UNICODE)
+                search_words = [word for word in words if word.lower() not in stopwords]
+
+                if not search_words:
+                    search_words = words
+
+                pubmed_query = " AND ".join(f"{word}[Title]" for word in search_words)
+            else:
+                pubmed_query = q
+
             term = build_pubmed_term(
-                q,
+                pubmed_query,
                 year_min=year_min,
                 year_max=year_max,
                 has_abstract=has_abstract,
@@ -276,6 +291,7 @@ async def fetch_all_source_candidates(
                 year_min=year_min,
                 year_max=year_max,
                 has_abstract=has_abstract,
+                title_only=title_only,
             )
 
             for p in papers or []:
@@ -316,6 +332,7 @@ async def fetch_all_source_candidates(
                 year_min=year_min,
                 year_max=year_max,
                 has_abstract=has_abstract,
+                title_only=title_only,
             )
 
             for p in papers or []:
@@ -355,6 +372,7 @@ async def fetch_all_source_candidates(
                 year_min=year_min,
                 year_max=year_max,
                 has_abstract=has_abstract,
+                title_only=title_only,
             )
 
             for p in papers or []:
@@ -402,6 +420,7 @@ async def fetch_all_source_candidates(
                 has_abstract=has_abstract,
                 mesh=mesh,
                 mesh_mode=mesh_mode,
+                title_only=title_only,
             )
 
             for p in papers or []:

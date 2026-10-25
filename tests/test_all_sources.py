@@ -95,6 +95,8 @@ async def test_fetch_all_source_candidates_includes_doaj(
         candidate_n=20,
     )
 
+    assert mock_openalex_search.call_args.kwargs["title_only"] is False
+
     assert result["source_counts"] == {
         "pubmed": 1,
         "openalex": 1,
@@ -122,6 +124,95 @@ async def test_fetch_all_source_candidates_includes_doaj(
         year_min=None,
         year_max=None,
         has_abstract=False,
+        title_only=False,
+    )
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.search_semantic_scholar")
+@patch("app.all_sources.europe_pmc_search")
+@patch("app.all_sources.doaj_search")
+@patch("app.all_sources.crossref_search")
+@patch("app.all_sources.openalex_search")
+@patch("app.all_sources.pubmed_fetch_details", new_callable=AsyncMock)
+@patch("app.all_sources.pubmed_search_page", new_callable=AsyncMock)
+async def test_fetch_all_source_candidates_passes_title_only_to_openalex(
+    mock_pubmed_search_page,
+    mock_pubmed_fetch_details,
+    mock_openalex_search,
+    mock_crossref_search,
+    mock_doaj_search,
+    mock_europe_pmc_search,
+    mock_semantic_scholar_search,
+) -> None:
+    pubmed_result = Mock()
+    pubmed_result.pmids = []
+    mock_pubmed_search_page.return_value = pubmed_result
+    mock_pubmed_fetch_details.return_value = []
+
+    mock_openalex_search.return_value = ([], 0)
+    mock_crossref_search.return_value = ([], 0)
+    mock_doaj_search.return_value = ([], 0)
+    mock_europe_pmc_search.return_value = ([], 0, None)
+    mock_semantic_scholar_search.return_value = ([], 0)
+
+    await fetch_all_source_candidates(
+        q="Machine Learning in Cancer",
+        candidate_n=20,
+        title_only=True,
+    )
+
+    assert mock_openalex_search.call_args.kwargs["title_only"] is True
+
+    assert mock_doaj_search.call_args.kwargs["title_only"] is True
+
+    assert mock_pubmed_search_page.call_args.args[0] == (
+        "Machine[Title] AND Learning[Title] AND Cancer[Title]"
+    )
+
+    assert mock_crossref_search.call_args.kwargs["title_only"] is True
+
+    assert mock_europe_pmc_search.call_args.kwargs["title_only"] is True
+
+    assert mock_semantic_scholar_search.call_args.args[0] == "Machine Learning in Cancer"
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.search_semantic_scholar")
+@patch("app.all_sources.europe_pmc_search")
+@patch("app.all_sources.doaj_search")
+@patch("app.all_sources.crossref_search")
+@patch("app.all_sources.openalex_search")
+@patch("app.all_sources.pubmed_fetch_details", new_callable=AsyncMock)
+@patch("app.all_sources.pubmed_search_page", new_callable=AsyncMock)
+async def test_title_search_pubmed_query_removes_punctuation(
+    mock_pubmed_search_page,
+    mock_pubmed_fetch_details,
+    mock_openalex_search,
+    mock_crossref_search,
+    mock_doaj_search,
+    mock_europe_pmc_search,
+    mock_semantic_scholar_search,
+) -> None:
+    pubmed_result = Mock()
+    pubmed_result.pmids = []
+    mock_pubmed_search_page.return_value = pubmed_result
+    mock_pubmed_fetch_details.return_value = []
+
+    mock_openalex_search.return_value = ([], 0)
+    mock_crossref_search.return_value = ([], 0)
+    mock_doaj_search.return_value = ([], 0)
+    mock_europe_pmc_search.return_value = ([], 0, None)
+    mock_semantic_scholar_search.return_value = ([], 0)
+
+    await fetch_all_source_candidates(
+        q="COVID-19: Diagnosis and Treatment",
+        candidate_n=20,
+        title_only=True,
+    )
+
+    assert mock_pubmed_search_page.call_args.args[0] == (
+        "COVID-19[Title] AND Diagnosis[Title] AND Treatment[Title]"
     )
 
 
@@ -218,6 +309,7 @@ async def test_fetch_all_source_candidates_passes_abstract_filter_to_openalex(
         year_min=None,
         year_max=None,
         has_abstract=True,
+        title_only=False,
     )
 
 
@@ -263,6 +355,7 @@ async def test_fetch_all_source_candidates_passes_abstract_filter_to_crossref(
         year_min=None,
         year_max=None,
         has_abstract=True,
+        title_only=False,
     )
 
 
@@ -656,4 +749,5 @@ async def test_fetch_all_source_candidates_passes_mesh_mode_to_europe_pmc(
         has_abstract=False,
         mesh="Humans|Adolescent",
         mesh_mode="and",
+        title_only=False,
     )
