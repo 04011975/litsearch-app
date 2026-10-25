@@ -1,4 +1,4 @@
-# app/main.py
+﻿# app/main.py
 from __future__ import annotations
 
 import csv
@@ -7,6 +7,7 @@ import io
 
 from app.identifiers import doi_matches, normalize_doi
 from app.doi_lookup import lookup_doi, lookup_pmid, lookup_pmcid
+from app.title_search import search_titles
 
 import math
 import os
@@ -1369,6 +1370,44 @@ def health():
 def root():
     return RedirectResponse(url="/search")
 
+
+@app.get("/title-search", response_class=HTMLResponse)
+async def title_search(
+    request: Request,
+    q: str = Query("", description="Publication title"),
+):
+    q = q.strip()
+
+    if not q:
+        return templates.TemplateResponse(
+            request,
+            "title_results.html",
+            {
+                "q": "",
+                "source": "all",
+                "matches": [],
+                "total_matches": 0,
+                "source_counts": {},
+                "failed_sources": [],
+                "duplicates_removed": 0,
+            },
+        )
+
+    result = await search_titles(q)
+
+    return templates.TemplateResponse(
+        request,
+        "title_results.html",
+        {
+            "q": result.query,
+            "source": "all",
+            "matches": result.matches,
+            "total_matches": len(result.matches),
+            "source_counts": result.source_counts,
+            "failed_sources": result.failed_sources,
+            "duplicates_removed": result.duplicates_removed,
+        },
+    )
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
