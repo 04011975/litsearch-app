@@ -116,6 +116,11 @@
     {% if lookup in ["doi", "pmid", "pmcid"] %}selected{% endif %}>
     Identifier Lookup
   </option>
+
+  <option value="title">
+    Title Search
+  </option>
+
 </select>
 
 <select id="lookup_mode"
@@ -754,6 +759,8 @@
 
   function updateLookupMode() {
     const isIdentifierLookup = searchMode.value === "identifier";
+    const isTitleSearch = searchMode.value === "title";
+    form.action = isTitleSearch ? "/title-search" : "/search";
 
     lookupMode.hidden = !isIdentifierLookup;
     lookupMode.disabled = !isIdentifierLookup;
@@ -762,13 +769,13 @@
       sourceSelect.value = "all";
     }
 
-    sourceSelect.disabled = isIdentifierLookup;
+    sourceSelect.disabled = isIdentifierLookup || isTitleSearch;
 
     filterNames.forEach(function (name) {
       const field = form.elements.namedItem(name);
 
       if (field) {
-        field.disabled = isIdentifierLookup
+        field.disabled = (isIdentifierLookup || isTitleSearch)
           ? true
           : originalDisabled.get(name);
       }
@@ -783,6 +790,9 @@
       lookupMode.disabled = false;
       sourceSelect.disabled = false;
       sourceSelect.value = "all";
+    } else if (searchMode.value === "title") {
+      lookupMode.disabled = true;
+      sourceSelect.disabled = true;
     } else {
       lookupMode.disabled = true;
     }

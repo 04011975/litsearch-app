@@ -77,9 +77,48 @@
 
       <h3>{{ paper.title }}</h3>
 
+      {% if paper.authors %}
+        <p>
+          <strong>Authors:</strong>
+          {{ paper.authors | join(", ") }}
+        </p>
+      {% endif %}
+
+      {% if paper.year %}
+        <p>
+          <strong>Year:</strong> {{ paper.year }}
+        </p>
+      {% endif %}
+
+      {% if paper.journal %}
+        <p>
+          <strong>Journal:</strong> {{ paper.journal }}
+        </p>
+      {% endif %}
+
+      {% if paper.doi %}
+        <p>
+          <strong>DOI:</strong>
+          <a href="https://doi.org/{{ paper.doi | urlencode }}"
+             target="_blank"
+             rel="noopener noreferrer">
+            {{ paper.doi }}
+          </a>
+        </p>
+      {% endif %}
+
       <p class="muted">
         Source: {{ paper.source }}
       </p>
+
+      {% set primary_source = paper.source.split("|")[0] %}
+      {% if paper.id and primary_source %}
+        <p>
+          <a href="/paper/{{ primary_source | urlencode }}/{{ paper.id | urlencode }}">
+            View details
+          </a>
+        </p>
+      {% endif %}
 
     </div>
   {% endfor %}
