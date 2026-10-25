@@ -165,3 +165,52 @@ def test_crossref_mapping_rejects_invalid_doi():
 
     assert paper.doi is None
     assert paper.id == "https://example.org/publication"
+
+
+@patch("app.connectors.crossref.requests.get")
+def test_crossref_search_title_only_uses_title_query(mock_get):
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "message": {
+            "total-results": 0,
+            "items": [],
+        }
+    }
+    mock_get.return_value = response
+
+    crossref_search(
+        "Machine Learning in Cancer",
+        page=1,
+        n=10,
+        title_only=True,
+    )
+
+    params = mock_get.call_args.kwargs["params"]
+
+    assert params["query.title"] == "Machine Learning in Cancer"
+    assert "query" not in params
+
+
+@patch("app.connectors.crossref.requests.get")
+def test_crossref_search_default_uses_general_query(mock_get):
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "message": {
+            "total-results": 0,
+            "items": [],
+        }
+    }
+    mock_get.return_value = response
+
+    crossref_search(
+        "machine learning cancer",
+        page=1,
+        n=10,
+    )
+
+    params = mock_get.call_args.kwargs["params"]
+
+    assert params["query"] == "machine learning cancer"
+    assert "query.title" not in params

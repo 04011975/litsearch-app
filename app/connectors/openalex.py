@@ -143,6 +143,7 @@ def openalex_search(
     year_min: Optional[int] = None,
     year_max: Optional[int] = None,
     has_abstract: bool = False,
+    title_only: bool = False,
 ) -> Tuple[List[Paper], int]:
     q = (q or "").strip()
     page = max(1, int(page))
@@ -166,6 +167,11 @@ def openalex_search(
         year_max,
         has_abstract=has_abstract,
     )
+
+    if title_only:
+        title_filter = f"title.search:{q}"
+        filt = f"{filt},{title_filter}" if filt else title_filter
+        params.pop("search", None)
 
     if filt:
         params["filter"] = filt
