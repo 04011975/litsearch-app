@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Title Search | LitSearch{% endblock %}
+
+{% block content %}
+
+<h2>Title Search</h2>
+
+<p class="muted">
+  Search for scientific publications by title across multiple scholarly sources.
+</p>
+
+<form action="/title-search" method="get">
+  <input
+    type="text"
+    name="q"
+    value="{{ q or '' }}"
+    placeholder="Enter publication title"
+    size="60"
+    required
+  />
+
+  <button type="submit" class="btn-primary">
+    Search Title
+  </button>
+</form>
+
+{% if failed_sources %}
+  <div class="callout-warn" role="alert">
+    <strong>Incomplete search results</strong>
+    <p>
+      The following sources could not be searched:
+      {{ failed_sources | join(", ") }}.
+    </p>
+    <p>
+      Results may be incomplete.
+    </p>
+  </div>
+{% endif %}
+
+{% if duplicates_removed > 0 %}
+  <p class="muted">
+    Duplicate records removed:
+    <strong>{{ duplicates_removed }}</strong>
+  </p>
+{% endif %}
+
+{% if source_counts %}
+  <div class="card" style="margin-bottom: 14px;">
+    <h3>Source Retrieval Statistics</h3>
+
+    <p class="muted">
+      Candidate records retrieved before title matching and deduplication.
+    </p>
+
+    {% for source_name, count in source_counts.items() %}
+      <p>
+        {{ source_name }}:
+        <strong>{{ count }}</strong>
+      </p>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<hr>
+
+{% if matches %}
+
+  <h3>Search Results ({{ total_matches }})</h3>
+
+  {% for paper, match_type in matches %}
+    <div class="card" style="margin-bottom: 12px;">
+
+      <span class="badge">
+        {{ match_type | capitalize }} match
+      </span>
+
+      <h3>{{ paper.title }}</h3>
+
+      <p class="muted">
+        Source: {{ paper.source }}
+      </p>
+
+    </div>
+  {% endfor %}
+
+{% elif q %}
+
+  <p class="muted">
+    No matching publications found.
+  </p>
+
+{% endif %}
+
+<a href="/search" class="btn-secondary">
+  Back to Literature Search
+</a>
+
+{% endblock %}
