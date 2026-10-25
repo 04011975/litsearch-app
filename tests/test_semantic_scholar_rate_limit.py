@@ -143,3 +143,81 @@ def test_request_reacquires_distributed_rate_limit_on_429_retry(monkeypatch):
     assert result == {}
     assert len(request_calls) == 2
     assert len(acquire_calls) == 2
+
+
+def test_request_raises_on_http_403(monkeypatch):
+    import pytest
+    from app.connectors.semantic_scholar import (
+        SemanticScholarError,
+        _request,
+    )
+
+    class FakeResponse:
+        status_code = 403
+        text = "Forbidden"
+        headers = {}
+
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar._session.get",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar._acquire_distributed_rate_limit",
+        lambda redis_client: None,
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar.time.sleep",
+        lambda seconds: None,
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar._last_request_time",
+        0.0,
+    )
+
+    with pytest.raises(SemanticScholarError, match="403"):
+        _request("https://example.test", {"query": "test"})
+
+
+def test_request_raises_after_http_429_retries(monkeypatch):
+    import pytest
+    from app.connectors.semantic_scholar import (
+        SemanticScholarError,
+        _request,
+    )
+
+    request_calls = []
+
+    class FakeResponse:
+        status_code = 429
+        text = "Too Many Requests"
+        headers = {}
+
+    def fake_get(*args, **kwargs):
+        request_calls.append(1)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar._session.get",
+        fake_get,
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar._acquire_distributed_rate_limit",
+        lambda redis_client: None,
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar.time.sleep",
+        lambda seconds: None,
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar.random.uniform",
+        lambda a, b: 0,
+    )
+    monkeypatch.setattr(
+        "app.connectors.semantic_scholar._last_request_time",
+        0.0,
+    )
+
+    with pytest.raises(SemanticScholarError, match="429"):
+        _request("https://example.test", {"query": "test"})
+
+    assert len(request_calls) == 3
