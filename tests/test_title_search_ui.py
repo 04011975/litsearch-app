@@ -216,3 +216,55 @@ def test_title_search_navigation(client):
     assert title_response.status_code == 200
     assert 'href="/search"' in title_response.text
     assert 'action="/title-search"' in title_response.text
+
+
+def test_title_search_available_as_search_mode(client):
+    response = client.get("/search")
+
+    assert response.status_code == 200
+    assert 'id="search_mode"' in response.text
+    assert '<option value="literature"' in response.text
+    assert '<option value="identifier"' in response.text
+    assert '<option value="title"' in response.text
+
+
+def test_title_search_detail_link_uses_primary_source(
+    client, monkeypatch
+):
+    from app.models.paper import Paper
+    from app.title_search import TitleSearchResult
+
+    paper = Paper(
+        id="10.1234/example",
+        title="Machine Learning in Cancer",
+        source="crossref|semantic_scholar",
+        doi="10.1234/example",
+    )
+
+    async def fake_search_titles(query):
+        return TitleSearchResult(
+            query=query,
+            matches=[(paper, "exact")],
+            source_counts={
+                "crossref": 1,
+                "semantic_scholar": 1,
+            },
+            failed_sources=[],
+            duplicates_removed=1,
+        )
+
+    monkeypatch.setattr(
+        main,
+        "search_titles",
+        fake_search_titles,
+    )
+
+    response = client.get(
+        "/title-search",
+        params={"q": "Machine Learning in Cancer"},
+    )
+
+    assert response.status_code == 200
+    assert 'href="/paper/crossref/10.1234/example"' in response.text
+    assert "View details" in response.text
+    assert "/paper/crossref|semantic_scholar/" not in response.text
