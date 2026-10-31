@@ -7,53 +7,114 @@
 
   <style>
     :root {
-      --border:#ddd;
-      --text:#111;
-      --muted:#666;
-      --bg:#fff;
-      --chip:#f7f7f7;
-      --warn:#fff7d6;
-      --err:#ffeaea;
+      /* BibQPrompt brand colors */
+      --brand-green: #217721;
+      --brand-gold: #E49E2E;
+      --brand-purple: #381D92;
+      --brand-purple-dark: #1C0A63;
+      --brand-purple-light: #F2F2FA;
+
+      /* Existing interface colors */
+      --border: #ddd;
+      --text: #111;
+      --muted: #666;
+      --bg: #FAF9FC;
+      --chip: #f7f7f7;
+      --warn: #fff7d6;
+      --err: #ffeaea;
     }
 
-    body {
-      font-family: Arial, sans-serif;
-      margin: 2rem;
-      max-width: 1100px;
-      color: var(--text);
+    html {
       background: var(--bg);
     }
 
-    a { color: inherit; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      max-width: 1200px;
+      min-height: 100vh;
+      box-sizing: border-box;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+    }
+
+    a {
+      color: var(--brand-purple);
+      text-decoration-color: currentColor;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: var(--brand-purple-dark);
+    }
 
     .muted { color: var(--muted); font-size: 0.92rem; }
 
     .card {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 14px;
+      background: #fff;
+      border: 1px solid #E5E1EF;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(11, 6, 32, 0.05);
+      transition: box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+      box-shadow: 0 5px 18px rgba(11, 6, 32, 0.09);
     }
 
     .btn-primary {
-      padding: 10px 12px;
-      border: 1px solid #222;
-      border-radius: 8px;
-      background: #222;
+      display: inline-block;
+      padding: 11px 20px;
+      border: 1px solid var(--brand-green);
+      border-radius: 10px;
+      background: linear-gradient(
+        135deg,
+        var(--brand-green),
+        var(--brand-gold)
+      );
       color: #fff;
+      font-weight: 600;
+      font-size: 0.95rem;
       cursor: pointer;
       text-decoration: none;
-      display: inline-block;
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 4px 12px rgba(33, 119, 33, 0.2);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:focus-visible {
+      outline: 3px solid var(--brand-purple);
+      outline-offset: 3px;
     }
 
     .btn-secondary {
-      padding: 8px 10px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
+      display: inline-block;
+      padding: 9px 14px;
+      border: 1px solid #D8D0EB;
+      border-radius: 10px;
       background: #fff;
-      color: #111;
+      color: var(--brand-purple);
+      font-weight: 500;
       cursor: pointer;
       text-decoration: none;
-      display: inline-block;
+      transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .btn-secondary:hover {
+      background: var(--brand-purple-light);
+      border-color: var(--brand-purple);
+      color: var(--brand-purple-dark);
+    }
+
+    .btn-secondary:focus-visible {
+      outline: 3px solid var(--brand-purple);
+      outline-offset: 3px;
     }
 
     .badge {
@@ -69,9 +130,9 @@
     .badge:hover { background:#eee; }
 
     .badge.active {
-      background:#222;
-      color:#fff;
-      border-color:#222;
+      background: var(--brand-purple);
+      color: #fff;
+      border-color: var(--brand-purple);
     }
 
     .callout-warn {
@@ -97,9 +158,19 @@
     }
 
     input, select {
-      padding: 8px;
-      border:1px solid #ccc;
-      border-radius: 8px;
+      padding: 10px 12px;
+      border: 1px solid #D8D0EB;
+      border-radius: 10px;
+      background: #fff;
+      color: var(--text);
+      font-family: inherit;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    input:focus-visible, select:focus-visible {
+      outline: none;
+      border-color: var(--brand-purple);
+      box-shadow: 0 0 0 3px rgba(56, 29, 146, 0.15);
     }
 
     label {
