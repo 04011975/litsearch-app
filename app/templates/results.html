@@ -463,7 +463,7 @@
 
     <button
       type="submit"
-      {% if current_source == 'semantic_scholar' %}class="ss-throttle-btn"{% endif %}
+      class="btn-primary{% if current_source == 'semantic_scholar' %} ss-throttle-btn{% endif %}"
       {% if goto_disabled %}
         disabled
         title="{% if current_source == 'semantic_scholar' %}Direct page navigation is unavailable for Semantic Scholar in this interface.{% else %}Direct page navigation is not supported for Europe PMC without Redis cursor caching.{% endif %}"
