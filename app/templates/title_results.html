@@ -78,20 +78,20 @@
       <h3>{{ paper.title }}</h3>
 
       {% if paper.authors %}
-        <p>
+        <p class="muted">
           <strong>Authors:</strong>
           {{ paper.authors | join(", ") }}
         </p>
       {% endif %}
 
       {% if paper.year %}
-        <p>
+        <p class="muted">
           <strong>Year:</strong> {{ paper.year }}
         </p>
       {% endif %}
 
       {% if paper.journal %}
-        <p>
+        <p class="muted">
           <strong>Journal:</strong> {{ paper.journal }}
         </p>
       {% endif %}
