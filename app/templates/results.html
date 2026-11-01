@@ -778,6 +778,7 @@
         field.disabled = (isIdentifierLookup || isTitleSearch)
           ? true
           : originalDisabled.get(name);
+        field.hidden = isIdentifierLookup || isTitleSearch;
       }
     });
   }
