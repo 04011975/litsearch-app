@@ -810,7 +810,7 @@
     <div class="card" style="margin: 1rem 0;">
       <h3 style="margin:0 0 0.5rem 0;">{{ p.title }}</h3>
 
-      <div style="color:#555; margin-bottom:0.35rem;">
+      <div style="color:var(--muted); margin-bottom:0.35rem;">
         <strong>ID:</strong> {{ p.id or p.pmid }}
         {% if p.publication_date or p.year %} | <strong>Year:</strong> {{ p.publication_date or p.year }}{% endif %}
         {% if p.journal %} | <strong>Journal:</strong> {{ p.journal }}{% endif %}
@@ -818,7 +818,7 @@
       </div>
 
       {% if p.authors %}
-        <div style="color:#555; margin-bottom:0.5rem;">
+        <div style="color:var(--muted); margin-bottom:0.5rem;">
           <strong>Authors:</strong> {{ p.authors }}
         </div>
       {% endif %}
