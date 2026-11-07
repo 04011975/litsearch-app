@@ -350,6 +350,7 @@
 {% if not ss_failed %}
 <div style="display:flex; gap: 0.75rem; align-items:center; margin-bottom: 0.75rem; flex-wrap:wrap;">
 
+  {% if lookup not in ["doi", "pmid", "pmcid"] %}
   {# PREVIOUS #}
 
   {% if supports_previous %}
@@ -470,6 +471,8 @@
       {% endif %}
     >Go</button>
   </form>
+
+  {% endif %}
 
   {# EXPORT #}
   <div style="margin-left:auto; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
