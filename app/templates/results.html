@@ -485,6 +485,7 @@
   {% endif %}
 
   {# EXPORT #}
+  {% if lookup not in ["doi", "pmid", "pmcid"] or total_count > 0 %}
   <div style="margin-left:auto; display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
     {% if current_source == "semantic_scholar" %}
       <div class="muted" style="margin-right: 0.5rem;">
@@ -541,6 +542,7 @@
     <button type="button" id="export_start_btn" class="btn-primary">Start export job</button>
     <span id="export_status" class="muted"></span>
   </div>
+  {% endif %}
 </div>
 {% endif %}
 
