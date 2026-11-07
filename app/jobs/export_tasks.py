@@ -34,6 +34,13 @@ from app.core.export_logging import (
 )
 
 from app.models.paper import Paper
+
+from app.doi_lookup import (
+    lookup_doi,
+    lookup_pmid,
+    lookup_pmcid,
+)
+
 from app.connectors.europe_pmc import europe_pmc_search
 from app.connectors.openalex import openalex_search
 from app.connectors.crossref import crossref_search
@@ -2230,6 +2237,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
 
     source = _as_str(meta.get("source"))
     q = _as_str(meta.get("q"))
+    lookup = _as_str(meta.get("lookup")).lower()
     sort = _as_str(meta.get("sort") or "relevance")
     limit = min(int(_as_str(meta.get("limit") or "100") or "100"), BULK_HARD_CAP)
     fmt = _as_str(meta.get("fmt") or "csv")
@@ -2259,6 +2267,12 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
             raise RuntimeError("Query empty")
         if source not in SUPPORTED_EXPORT_SOURCES:
             raise RuntimeError(f"Unsupported source: {source}")
+
+        if lookup not in {"", "doi", "pmid", "pmcid"}:
+            raise RuntimeError(f"Unsupported lookup mode: {lookup}")
+
+        if lookup and source != "all":
+            raise RuntimeError("Identifier Lookup export requires source=all")
 
         export_sources = _resolve_export_sources(source)
 
@@ -2294,6 +2308,8 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         has_abstract_i = int((meta.get("has_abstract") or "0").strip() or "0")
 
         papers: List[Paper] = []
+        source_counts: dict[str, int] = {}
+        failed_sources: list[str] = []
         cache_stats = _new_cache_stats()
         cache_stats.update({
             "esearch_cache_hit_batches": 0,
@@ -2325,7 +2341,25 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
         # ALL SOURCES
         # =====================================================
 
-        if source == "all":
+        if lookup:
+            lookup_functions = {
+                "doi": lookup_doi,
+                "pmid": lookup_pmid,
+                "pmcid": lookup_pmcid,
+            }
+
+            lookup_result = await lookup_functions[lookup](q)
+
+            if lookup_result.paper is None:
+                raise RuntimeError(
+                    f"No exact publication found for {lookup.upper()}: {q}"
+                )
+
+            papers = [lookup_result.paper]
+            limit = 1
+
+        elif source == "all":
+
             source_counts: dict[str, int] = {}
             failed_sources: list[str] = []
             target_unique = int(limit)
@@ -2482,7 +2516,7 @@ async def run_export_job(ctx: dict, *, job_id: str) -> dict:
 
         records_before_final_dedup = len(papers)
 
-        if source in {"pubmed", "openalex", "crossref"}:
+        if lookup or source in {"pubmed", "openalex", "crossref"}:
             cross_source_duplicates_removed = 0
         else:
             papers, cross_source_duplicates_removed = deduplicate_papers(papers)

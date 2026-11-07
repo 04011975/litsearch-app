@@ -499,6 +499,8 @@
 
     <span><strong>Export</strong></span>
 
+    {% if not (lookup | default('')) %}
+
     {% if current_source == "europe_pmc" %}
       {% if epmc_export_url_csv and epmc_export_url_ris %}
         <a href="{{ epmc_export_url_csv }}">CSV (current page)</a>
@@ -521,15 +523,20 @@
         <a href="/export/ris?q={{ q|urlencode }}&source={{ current_source|urlencode }}&scope=page&page={{ page }}&n={{ n }}&sort={{ sort|urlencode }}&year_min={{ year_min|urlencode }}&year_max={{ year_max|urlencode }}&has_abstract={{ has_abstract }}{% if current_source=='all' and snapshot_id %}&snapshot_id={{ snapshot_id|urlencode }}{% endif %}{% if current_source=='pubmed' %}&mesh={{ mesh|urlencode }}&mesh_mode={{ (mesh_mode or 'or')|urlencode }}{% endif %}">RIS (current page)</a>
       {% endif %}
     {% endif %}
+    {% endif %}
 
     <span style="margin:0 0.25rem;">|</span>
 
     <select id="export_limit">
-      <option value="100">First 100</option>
-      <option value="500">First 500</option>
-      <option value="1000" selected>First 1000</option>
-      {% if current_source != "doaj" and (current_source != "semantic_scholar" or ss_bulk_mode) %}
-        <option value="2000">First 2000</option>
+      {% if lookup | default('') in ["doi", "pmid", "pmcid"] %}
+        <option value="1" selected>Exact publication (1)</option>
+      {% else %}
+        <option value="100">First 100</option>
+        <option value="500">First 500</option>
+        <option value="1000" selected>First 1000</option>
+        {% if current_source != "doaj" and (current_source != "semantic_scholar" or ss_bulk_mode) %}
+          <option value="2000">First 2000</option>
+        {% endif %}
       {% endif %}
     </select>
 
@@ -572,6 +579,9 @@
 
     params.set("q", "{{ q }}");
     params.set("source", "{{ current_source }}");
+    {% if lookup | default('') %}
+    params.set("lookup", {{ lookup | tojson }});
+    {% endif %}
     params.set("n", "{{ n }}");
     params.set("sort", "{{ sort }}");
     params.set("fmt", fmtEl.value);

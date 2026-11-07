@@ -3317,6 +3317,7 @@ async def search(
 async def create_export_job(
     request: Request,
     q: str = Query(..., min_length=1),
+    lookup: str = Query("", pattern="^(|doi|pmid|pmcid)$"),
     source: str = Query("pubmed", pattern=SOURCE_PATTERN),
     n: int = Query(10, ge=1, le=50),
     sort: str = Query("relevance"),
@@ -3341,7 +3342,15 @@ async def create_export_job(
     if source not in ALLOWED_SOURCES:
         raise HTTPException(422, f"Unknown source: {source}")
 
+    if lookup and source != "all":
+        raise HTTPException(
+            status_code=422,
+            detail="Identifier Lookup export requires source=all",
+        )
+
     limit = min(int(limit), EXPORT_HARD_CAP)
+    if lookup:
+        limit = 1
     n = max(1, min(int(n), 50))
 
     ui_sort = normalize_all_sources_sort(sort)
@@ -3368,6 +3377,7 @@ async def create_export_job(
             "fmt": fmt,
             "source": source,
             "q": q,
+            "lookup": lookup,
             "sort": ui_sort,
             "n": str(int(n)),
             "limit": str(int(limit)),
