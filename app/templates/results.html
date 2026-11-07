@@ -293,13 +293,23 @@
     Pagination may be temporarily unavailable because the Semantic Scholar API rate limit was reached. Please retry in a few moments or use another source.
   </div>
 {% else %}
+
   <div style="margin: 0.75rem 0;">
-    <strong>{{ "{:,}".format(total_count or 0) }}</strong>
-    records retrieved — page <strong>{{ page }}</strong>
-    {% if total_pages %}
-      of <strong>{{ total_pages }}</strong>
+    {% if lookup in ["doi", "pmid", "pmcid"] %}
+      {% if total_count == 1 %}
+        <strong>1 record found</strong>
+      {% else %}
+        <strong>No record found</strong>
+      {% endif %}
+    {% else %}
+      <strong>{{ "{:,}".format(total_count or 0) }}</strong>
+      records retrieved — page <strong>{{ page }}</strong>
+      {% if total_pages %}
+        of <strong>{{ total_pages }}</strong>
+      {% endif %}
     {% endif %}
   </div>
+
 {% endif %}
 
 {% if current_source == "pubmed" %}
@@ -875,8 +885,9 @@
       {% endif %}
     </div>
   {% endfor %}
+
 {% else %}
-  {% if not ss_failed %}
+  {% if not ss_failed and lookup not in ["doi", "pmid", "pmcid"] %}
     <p>No records retrieved.</p>
   {% endif %}
 {% endif %}
