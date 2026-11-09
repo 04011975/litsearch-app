@@ -134,6 +134,45 @@ def _build_filter(
     return ",".join(parts) if parts else None
 
 
+def _openalex_work_to_paper(work: dict) -> Paper:
+    """Convert an OpenAlex work response to the LitSearch Paper model."""
+    openalex_id = _openalex_short_id(work.get("id") or "")
+
+    year_raw = work.get("publication_year")
+    try:
+        year = int(year_raw) if year_raw is not None else None
+    except (TypeError, ValueError):
+        year = None
+
+    abstract = (work.get("abstract") or "").strip()
+    if not abstract:
+        abstract = _openalex_abstract_from_inverted_index(
+            work.get("abstract_inverted_index") or {}
+        )
+
+    concepts = [
+        str(concept.get("display_name")).strip()
+        for concept in (work.get("concepts") or [])
+        if concept.get("display_name")
+    ]
+
+    return Paper(
+        id=openalex_id,
+        source="openalex",
+        title=(work.get("title") or work.get("display_name") or "").strip(),
+        authors=_extract_authors(work),
+        journal=_journal_name(work),
+        year=year,
+        abstract=abstract or None,
+        doi=_normalize_doi(work.get("doi")),
+        url=_landing_url(work),
+        mesh_terms=[],
+        concepts=concepts,
+        pmcid=None,
+        has_full_text=False,
+    )
+
+
 def openalex_search(
     q: str,
     page: int = 1,
@@ -237,58 +276,9 @@ def openalex_search(
     papers: List[Paper] = []
 
     for w in works:
-        openalex_id = (w.get("id") or "").split("/")[-1]
-        title = (w.get("title") or w.get("display_name") or "").strip()
-
-        year_raw = w.get("publication_year")
-        try:
-            year = int(year_raw) if year_raw is not None else None
-        except Exception:
-            year = None
-
-        doi = _normalize_doi(w.get("doi"))
-        url = ((w.get("primary_location") or {}).get("landing_page_url")) or w.get("id")
-        journal = (
-            ((w.get("primary_location") or {}).get("source") or {}).get("display_name")
-            or ""
-        ).strip()
-
-        concepts = [
-            str(c.get("display_name")).strip()
-            for c in (w.get("concepts") or [])
-            if c.get("display_name")
-        ]
-
-        abstract = (w.get("abstract") or "").strip()
-        if not abstract:
-            abstract = _openalex_abstract_from_inverted_index(
-                w.get("abstract_inverted_index") or {}
-            )
-
-        papers.append(
-            Paper(
-                id=openalex_id,
-                source="openalex",
-                title=title,
-                authors=[
-                    ((a or {}).get("author") or {}).get("display_name")
-                    for a in (w.get("authorships") or [])
-                    if ((a or {}).get("author") or {}).get("display_name")
-                ],
-                journal=journal,
-                year=year,
-                abstract=abstract or None,
-                doi=doi,
-                url=url,
-                mesh_terms=[],
-                concepts=concepts,
-                pmcid=None,
-                has_full_text=False,
-            )
-        )
+        papers.append(_openalex_work_to_paper(w))
 
     return papers, total
-
 
 def openalex_fetch_detail(work_id: str) -> Paper | None:
     wid = (work_id or "").strip()
@@ -323,44 +313,5 @@ def openalex_fetch_detail(work_id: str) -> Paper | None:
         logger.exception("openalex_fetch_detail failed work_id=%r", work_id)
         return None
 
-    openalex_id_full = w.get("id") or wid
-    openalex_id_short = _openalex_short_id(openalex_id_full)
 
-    journal = _journal_name(w)
-
-    year_raw = w.get("publication_year")
-    try:
-        year = int(year_raw) if year_raw is not None else None
-    except Exception:
-        year = None
-
-    abstract = (w.get("abstract") or "").strip()
-
-    if not abstract:
-        inv = w.get("abstract_inverted_index")
-        if inv:
-            abstract = _openalex_abstract_from_inverted_index(inv)
-
-    title = (w.get("title") or w.get("display_name") or "").strip()
-
-    concepts = [
-        str(c.get("display_name")).strip()
-        for c in (w.get("concepts") or [])
-        if c.get("display_name")
-    ]
-
-    return Paper(
-        id=openalex_id_short,
-        source="openalex",
-        title=title,
-        authors=_extract_authors(w),
-        journal=journal,
-        year=year,
-        abstract=abstract or None,
-        doi=_normalize_doi(w.get("doi")),
-        url=_landing_url(w),
-        mesh_terms=[],
-        concepts=concepts,
-        pmcid=None,
-        has_full_text=False,
-    )
+    return _openalex_work_to_paper({**w, "id": w.get("id") or wid})
