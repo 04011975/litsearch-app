@@ -677,6 +677,14 @@ def test_lookup_openalex_doi_exact_match(monkeypatch):
     assert result.id == "W123456789"
     assert result.doi == "10.1000/example"
     assert result.title == "Exact DOI Match"
+    assert result.year == 2024
+    assert result.authors == []
+    assert result.journal == ""
+    assert result.abstract is None
+    assert result.concepts == []
+    assert result.pmcid is None
+    assert result.has_full_text is False
+
 
 
 

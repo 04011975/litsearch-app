@@ -13,6 +13,57 @@ def test_search_page_loads(client):
     assert "Search Results" in r.text or "LitSearch" in r.text
 
 
+def test_existing_paper_detail_pages_render(client, monkeypatch):
+    import pytest
+
+    sources = (
+        "pubmed",
+        "europe_pmc",
+        "openalex",
+        "semantic_scholar",
+    )
+
+    async def fake_fetch_detail(source, pid):
+        return Paper(
+            id=pid,
+            source=source,
+            title="Existing detail page regression test",
+        )
+
+    async def fake_enrich_paper_detail(paper):
+        return paper
+
+    monkeypatch.setattr(
+        client.app.state,
+        "fetch_detail_by_source",
+        fake_fetch_detail,
+    )
+    monkeypatch.setattr(
+        client.app.state,
+        "enrich_paper_detail",
+        fake_enrich_paper_detail,
+    )
+
+    for source in sources:
+        response = client.get(f"/paper/{source}/12345")
+
+        assert response.status_code == 200, source
+        assert "Existing detail page regression test" in response.text
+
+
+def test_search_rejects_unsupported_lookup_mode(client):
+    response = client.get(
+        "/search",
+        params={
+            "source": "all",
+            "lookup": "isbn",
+            "q": "example",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_homepage_offers_exact_doi_lookup(client):
     response = client.get("/")
 

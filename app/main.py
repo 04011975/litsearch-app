@@ -1418,7 +1418,11 @@ def favicon():
 async def search(
     request: Request,
     q: str = Query("", description="Query"),
-    lookup: str = Query("", description="Exact identifier lookup mode"),
+    lookup: str = Query(
+        "",
+        pattern="^(|doi|pmid|pmcid)$",
+        description="Exact identifier lookup mode",
+    ),
     source: str = Query("pubmed", pattern=SOURCE_PATTERN),
     n: int = Query(10, ge=1, le=50),
     page: int = Query(1, ge=1),

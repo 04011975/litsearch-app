@@ -122,7 +122,6 @@ async def lookup_europe_pmc_doi(doi: str) -> Paper | None:
     return None
 
 
-
 async def lookup_openalex_doi(doi: str) -> Paper | None:
     """Retrieve an OpenAlex work only when its DOI matches exactly."""
     import requests
@@ -168,50 +167,13 @@ async def lookup_openalex_doi(doi: str) -> Paper | None:
     if not doi_matches(normalized_doi, returned_doi):
         return None
 
-    openalex_id = openalex._openalex_short_id(
-        work.get("id") or ""
-    )
 
-    title = (
-        work.get("title") or work.get("display_name") or ""
-    ).strip()
 
-    year_raw = work.get("publication_year")
-    try:
-        year = int(year_raw) if year_raw is not None else None
-    except (TypeError, ValueError):
-        year = None
 
-    abstract = (work.get("abstract") or "").strip()
-    if not abstract:
-        inverted_index = work.get("abstract_inverted_index")
-        if inverted_index:
-            abstract = openalex._openalex_abstract_from_inverted_index(
-                inverted_index
-            )
 
-    concepts = [
-        str(concept.get("display_name")).strip()
-        for concept in (work.get("concepts") or [])
-        if concept.get("display_name")
-    ]
-
-    return Paper(
-        id=openalex_id,
-        source="openalex",
-        title=title,
-        authors=openalex._extract_authors(work),
-        journal=openalex._journal_name(work),
-        year=year,
-        abstract=abstract or None,
-        doi=normalized_doi,
-        url=openalex._landing_url(work),
-        mesh_terms=[],
-        concepts=concepts,
-        pmcid=None,
-        has_full_text=False,
-    )
-
+    paper = openalex._openalex_work_to_paper(work)
+    paper.doi = normalized_doi
+    return paper
 
 
 async def lookup_doaj_doi(doi: str) -> Paper | None:
