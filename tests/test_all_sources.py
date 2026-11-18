@@ -500,7 +500,7 @@ async def test_build_all_source_results_reuses_snapshot_across_pages(
         {
             "combined_raw": first_papers,
             "source_counts": {"pubmed": 4},
-            "failed_sources": [],
+            "failed_sources": ["openalex"],
         },
         {
             "combined_raw": changed_papers,
@@ -540,6 +540,9 @@ async def test_build_all_source_results_reuses_snapshot_across_pages(
 
     assert page_1["total_count"] == 4
     assert page_2["total_count"] == 4
+
+    assert page_1["failed_sources"] == ["openalex"]
+    assert page_2["failed_sources"] == ["openalex"]
 
     assert mock_fetch_all_source_candidates.await_count == 1
 

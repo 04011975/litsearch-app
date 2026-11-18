@@ -1,6 +1,10 @@
 import pytest
 
-from app.connectors.openalex import openalex_fetch_detail, openalex_search
+from app.connectors.openalex import (
+    OpenAlexTemporaryError,
+    openalex_fetch_detail,
+    openalex_search,
+)
 
 
 @pytest.mark.integration
@@ -275,13 +279,7 @@ def test_openalex_search_stops_after_repeated_429(monkeypatch):
         lambda seconds: None,
     )
 
-    papers, total = openalex_search(
-        "cancer",
-        page=1,
-        n=10,
-        sort="relevance",
-    )
+    with pytest.raises(OpenAlexTemporaryError):
+        openalex_search("cancer", page=1, n=10, sort="relevance")
 
     assert len(calls) == 3
-    assert papers == []
-    assert total == 0

@@ -19,6 +19,11 @@ PER_PAGE_MAX = 200
 TOOL_NAME = os.getenv("TOOL_NAME", "LitSearch")
 CONTACT_EMAIL = (os.getenv("CONTACT_EMAIL") or "").strip()
 
+class OpenAlexTemporaryError(Exception):
+    """Temporary OpenAlex API failure, such as rate limiting or timeout."""
+
+    pass
+
 
 def _user_agent() -> str:
     if CONTACT_EMAIL:
@@ -252,7 +257,9 @@ def openalex_search(
         )
 
         if attempt == max_attempts:
-            return [], 0
+            raise OpenAlexTemporaryError(
+                "OpenAlex rate limit exceeded (HTTP 429) after retries"
+            )
 
         retry_after = (getattr(r, "headers", {}) or {}).get("Retry-After")
         try:
