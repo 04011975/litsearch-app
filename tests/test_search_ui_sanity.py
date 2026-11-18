@@ -3434,6 +3434,46 @@ def test_openalex_page_one_fetches_upstream_only_once(client, monkeypatch):
     assert calls[0]["n"] == 5
 
 
+def test_openalex_temporary_error_does_not_cache_results(client, monkeypatch):
+    from app.connectors.openalex import OpenAlexTemporaryError
+
+    cache_writes = []
+
+    async def fake_cache_get_json(redis, key):
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        cache_writes.append((key, value))
+
+    def fake_openalex_search(*args, **kwargs):
+        raise OpenAlexTemporaryError("HTTP 429")
+
+    monkeypatch.setattr(
+        "app.main.cache_get_json", fake_cache_get_json
+    )
+    monkeypatch.setattr(
+        "app.main.cache_set_json", fake_cache_set_json
+    )
+    monkeypatch.setattr(
+        "app.main.openalex_search", fake_openalex_search
+    )
+
+    response = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 1,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "tijdelijk" in response.text.lower()
+    assert cache_writes == []
+
+
 def test_openalex_abstract_filter_changes_cache_keys(client, monkeypatch):
     cache_keys = []
 
@@ -3493,6 +3533,42 @@ def test_openalex_abstract_filter_changes_cache_keys(client, monkeypatch):
     keys_with_abstract_filter = list(cache_keys)
 
     assert keys_without_abstract_filter != keys_with_abstract_filter
+
+
+def test_openalex_page_temporary_error_does_not_cache(client, monkeypatch):
+    from app.connectors.openalex import OpenAlexTemporaryError
+
+    cache_writes = []
+
+    async def fake_cache_get_json(redis, key):
+        if key.startswith("cache:openalex:meta"):
+            return {"total_count": 15}
+        return None
+
+    async def fake_cache_set_json(redis, key, value, ttl):
+        cache_writes.append((key, value))
+
+    def fake_openalex_search(*args, **kwargs):
+        raise OpenAlexTemporaryError("HTTP 429")
+
+    monkeypatch.setattr("app.main.cache_get_json", fake_cache_get_json)
+    monkeypatch.setattr("app.main.cache_set_json", fake_cache_set_json)
+    monkeypatch.setattr("app.main.openalex_search", fake_openalex_search)
+
+    response = client.get(
+        "/search",
+        params={
+            "q": "cancer",
+            "source": "openalex",
+            "page": 2,
+            "n": 5,
+            "sort": "relevance",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "tijdelijk" in response.text.lower()
+    assert cache_writes == []
 
 
 def test_openalex_uses_cached_page_without_upstream_call(client, monkeypatch):

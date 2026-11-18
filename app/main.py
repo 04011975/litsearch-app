@@ -42,7 +42,13 @@ from app.connectors.europe_pmc import (
     europe_pmc_search,
     EuropePmcTemporaryError,
 )
-from app.connectors.openalex import openalex_fetch_detail, openalex_search
+
+from app.connectors.openalex import (
+    OpenAlexTemporaryError,
+    openalex_fetch_detail,
+    openalex_search,
+)
+
 from app.connectors.crossref import crossref_fetch_detail, crossref_search
 from app.connectors.doaj import doaj_fetch_detail, doaj_search
 from app.connectors.pubmed import (
@@ -1715,6 +1721,21 @@ async def search(
         total_count = result["total_count"]
         duplicates_removed = result["duplicates_removed"]
 
+        failed_sources = result.get("failed_sources", [])
+
+        warning = (
+            f"Multi-source results with DOI/title deduplication "
+            f"({duplicates_removed} duplicates removed)"
+        )
+
+        if failed_sources:
+            warning += (
+                ". Let op: de zoekresultaten zijn mogelijk onvolledig. "
+                "De volgende bronnen konden niet worden geraadpleegd: "
+                + ", ".join(failed_sources)
+                + ". Probeer de zoekopdracht later opnieuw."
+            )
+
         snapshot_id = result.get("snapshot_id")
 
         combined_papers = [
@@ -1791,7 +1812,7 @@ async def search(
                 "total_count": total_count,
                 "total_pages": total_pages,
                 "error": None,
-                "warning": f"Multi-source results with DOI/title deduplication ({duplicates_removed} duplicates removed)",
+                "warning": warning,
                 "previous_url": previous_url,
                 "next_url": next_url,
                 "last_url": last_url,
@@ -2406,17 +2427,66 @@ async def search(
         cached_meta = await cache_get_json(redis, ck_meta)
         if cached_meta and "total_count" in cached_meta:
             total_count = int(cached_meta.get("total_count") or 0)
+
         else:
-            first_page_papers, total_count = await _run_sync(
-                openalex_search,
-                q,
-                page=1,
-                n=fetch_n,
-                sort=openalex_sort,  # mapped for API
-                year_min=year_min_i,
-                year_max=year_max_i,
-                has_abstract=bool(has_abstract),
-            )
+            try:
+                first_page_papers, total_count = await _run_sync(
+                    openalex_search,
+                    q,
+                    page=1,
+                    n=fetch_n,
+                    sort=openalex_sort,  # mapped for API
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=bool(has_abstract),
+                )
+
+            except OpenAlexTemporaryError as exc:
+                logger.warning(
+                    "OPENALEX SEARCH temporary failure q=%r error=%s",
+                    q,
+                    exc,
+                )
+
+                ctx = _template_base_context(
+                    request,
+                    q=q,
+                    source="openalex",
+                    n=n,
+                    page=1,
+                    sort=ui_sort,
+                    year_min=year_min,
+                    year_max=year_max,
+                    has_abstract=has_abstract,
+                    mesh=mesh,
+                )
+
+                ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+                ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+
+                ctx.update(
+                    {
+                        "papers": [],
+                        "mesh_suggestions": [],
+                        "concept_suggestions": [],
+                        "total_count": 0,
+                        "total_pages": 1,
+                        "error": None,
+                        "warning": (
+                            "OpenAlex is tijdelijk niet beschikbaar. "
+                            "De zoekresultaten konden niet worden opgehaald. "
+                            "Probeer het later opnieuw."
+                        ),
+                        "next_url": None,
+                        "last_url": None,
+                        "previous_url": None,
+                    }
+                )
+
+                return templates.TemplateResponse(
+                    request, "results.html", ctx
+                )
+
             await cache_set_json(
                 redis, ck_meta, {"total_count": int(total_count)}, OPENALEX_CACHE_TTL_S
             )
@@ -2482,17 +2552,66 @@ async def search(
                 {"papers": [p.to_dict() for p in (oa_papers or [])]},
                 OPENALEX_CACHE_TTL_S,
             )
+
         else:
-            oa_papers, _ = await _run_sync(
-                openalex_search,
-                q,
-                page=page_i,
-                n=fetch_n,
-                sort=openalex_sort,  # mapped for API
-                year_min=year_min_i,
-                year_max=year_max_i,
-                has_abstract=bool(has_abstract),
-            )
+            try:
+                oa_papers, _ = await _run_sync(
+                    openalex_search,
+                    q,
+                    page=page_i,
+                    n=fetch_n,
+                    sort=openalex_sort,  # mapped for API
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=bool(has_abstract),
+                )
+            except OpenAlexTemporaryError as exc:
+                logger.warning(
+                    "OPENALEX SEARCH temporary page failure q=%r page=%s error=%s",
+                    q,
+                    page_i,
+                    exc,
+                )
+
+                ctx = _template_base_context(
+                    request,
+                    q=q,
+                    source="openalex",
+                    n=n,
+                    page=page_i,
+                    sort=ui_sort,
+                    year_min=year_min,
+                    year_max=year_max,
+                    has_abstract=has_abstract,
+                    mesh=mesh,
+                )
+
+                ctx["source_specializations"] = SOURCE_SPECIALIZATIONS
+                ctx["source_info"] = SOURCE_SPECIALIZATIONS.get(source)
+
+                ctx.update(
+                    {
+                        "papers": [],
+                        "mesh_suggestions": [],
+                        "concept_suggestions": [],
+                        "total_count": total_count,
+                        "total_pages": total_pages,
+                        "error": None,
+                        "warning": (
+                            "OpenAlex is tijdelijk niet beschikbaar. "
+                            "De gevraagde resultatenpagina kon niet worden opgehaald. "
+                            "Probeer het later opnieuw."
+                        ),
+                        "next_url": None,
+                        "last_url": None,
+                        "previous_url": None,
+                    }
+                )
+
+                return templates.TemplateResponse(
+                    request, "results.html", ctx
+                )
+
             await cache_set_json(
                 redis,
                 ck_page,
