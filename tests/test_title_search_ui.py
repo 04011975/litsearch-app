@@ -268,3 +268,22 @@ def test_title_search_detail_link_uses_primary_source(
     assert 'href="/paper/crossref/10.1234/example"' in response.text
     assert "View details" in response.text
     assert "/paper/crossref|semantic_scholar/" not in response.text
+
+
+def test_title_search_explains_matching_and_limitations(client):
+    from pathlib import Path
+
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "app"
+        / "templates"
+        / "title_results.html"
+    )
+
+    content = template.read_text(encoding="utf-8")
+
+    assert "Title matches are classified as exact" in content
+    assert "normalized (equivalent after text normalization)" in content
+    assert "partial (the search title occurs" in content
+    assert "Semantic Scholar uses a general search" in content
+    assert "omit relevant title matches" in content
