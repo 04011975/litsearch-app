@@ -10,6 +10,21 @@
   Search for scientific publications by title across multiple scholarly sources.
 </p>
 
+<p class="muted">
+  Title matches are classified as exact (identical title),
+  normalized (equivalent after text normalization), or
+  partial (the search title occurs as a consecutive sequence
+  of words within a longer title).
+</p>
+
+<p class="muted">
+  Search limitations: Semantic Scholar uses a general search
+  followed by local title matching. Its results may therefore
+  omit relevant title matches even when the source is available.
+  Title matching is limited to the candidate records retrieved
+  from the connected sources.
+</p>
+
 <form action="/title-search" method="get">
   <input
     type="text"
