@@ -153,3 +153,34 @@ async def test_pubmed_date_desc_is_recent_firstish():
 
     assert years
     assert max(years) >= min(years)
+
+def test_pubmed_preserves_future_publication_year():
+    import xml.etree.ElementTree as ET
+
+    from app.connectors.pubmed import _extract_preferred_pubdate
+
+    article = ET.fromstring(
+        """
+        <Article>
+            <Journal>
+                <JournalIssue>
+                    <PubDate>
+                        <Year>2028</Year>
+                        <Month>Sep</Month>
+                        <Day>15</Day>
+                    </PubDate>
+                </JournalIssue>
+            </Journal>
+            <ArticleDate DateType="Electronic">
+                <Year>2028</Year>
+                <Month>09</Month>
+                <Day>15</Day>
+            </ArticleDate>
+        </Article>
+        """
+    )
+
+    pubdate, year = _extract_preferred_pubdate(article)
+
+    assert year == 2028
+    assert pubdate == "2028 09 15"
