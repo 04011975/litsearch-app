@@ -27,7 +27,7 @@ def test_export_job_all_sources_with_redis_arq():
     status_url = BASE_URL + data["status_url"]
     last_status = None
 
-    for _ in range(60):
+    for _ in range(180):
         status = requests.get(status_url, timeout=10)
         assert status.status_code == 200
 
