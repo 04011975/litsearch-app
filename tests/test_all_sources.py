@@ -549,6 +549,56 @@ async def test_build_all_source_results_reuses_snapshot_across_pages(
 
 @pytest.mark.anyio
 @patch("app.all_sources.fetch_all_source_candidates")
+async def test_build_all_source_results_reuses_snapshot_on_same_page(
+    mock_fetch_all_source_candidates,
+) -> None:
+    from app.all_sources import build_all_source_results
+
+    mock_fetch_all_source_candidates.return_value = {
+        "combined_raw": [
+            _paper("p1", "pubmed"),
+            _paper("p2", "pubmed"),
+            _paper("p3", "pubmed"),
+            _paper("p4", "pubmed"),
+        ],
+        "source_counts": {"pubmed": 4},
+        "failed_sources": [],
+    }
+
+    redis = _FakeRedis()
+
+    first = await build_all_source_results(
+        q="machine learning cancer",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+    )
+
+    snapshot_id = first["snapshot_id"]
+    assert snapshot_id
+
+    repeated = await build_all_source_results(
+        q="machine learning cancer",
+        sort="relevance",
+        limit=None,
+        page=1,
+        n=2,
+        redis=redis,
+        snapshot_id=snapshot_id,
+    )
+
+    assert repeated["snapshot_id"] == snapshot_id
+    assert [paper.id for paper in first["papers"]] == ["p1", "p2"]
+    assert [paper.id for paper in repeated["papers"]] == ["p1", "p2"]
+    assert repeated["total_count"] == first["total_count"] == 4
+
+    mock_fetch_all_source_candidates.assert_awaited_once()
+
+
+@pytest.mark.anyio
+@patch("app.all_sources.fetch_all_source_candidates")
 async def test_build_all_source_results_rejects_snapshot_for_different_query(
     mock_fetch_all_source_candidates,
 ) -> None:
