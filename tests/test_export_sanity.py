@@ -676,7 +676,7 @@ def test_export_all_sources_ris_page(client, monkeypatch):
                     authors=["Tester A"],
                     journal="Test Journal",
                     year=2024,
-                    abstract="Test abstract",
+                    abstract="Background\n<h4>Methods</h4>Study results",
                     doi="10.1234/all-test",
                     pmcid=None,
                     url="https://example.org/all-test",
@@ -714,6 +714,9 @@ def test_export_all_sources_ris_page(client, monkeypatch):
     assert "TY  - JOUR" in r.text
     assert "Mock All Sources Paper" in r.text
     assert "ER  -" in r.text
+    assert "AB  - Background Methods Study results" in r.text
+    assert "<h4>" not in r.text
+    assert "Background\n<h4>" not in r.text
 
 
 def test_export_all_sources_xlsx_page(client, monkeypatch):
