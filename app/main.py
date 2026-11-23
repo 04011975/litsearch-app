@@ -86,6 +86,12 @@ from app.services.export_service import (
     validate_export_request_params,
 )
 
+from app.services.pubmed_snapshot import (
+    pubmed_snapshot_signature,
+    store_pubmed_snapshot,
+    load_pubmed_snapshot,
+)
+
 from datetime import datetime
 
 from app.all_sources import (
@@ -3311,6 +3317,24 @@ async def search(
 
         mesh_suggestions = _extract_mesh_suggestions(papers_dicts, limit=10)
 
+        snapshot_signature = pubmed_snapshot_signature(
+            q=q,
+            sort=ui_sort,
+            page=capped_page,
+            n=n,
+            year_min=year_min_i,
+            year_max=year_max_i,
+            has_abstract=bool(has_abstract),
+            mesh=mesh,
+            mesh_mode=mesh_mode,
+        )
+
+        pubmed_snapshot_id = await store_pubmed_snapshot(
+            getattr(request.app.state, "redis", None),
+            request_signature=snapshot_signature,
+            papers=[p.to_dict() for p in (fetched or [])],
+        )
+
     logger.info(
         "PUBMED SEARCH success q=%r page=%s results=%s total=%s capped=%s",
         q,
@@ -3369,6 +3393,7 @@ async def search(
     ctx.update(
         {
             "papers": papers_dicts,
+            "snapshot_id": pubmed_snapshot_id,
             "mesh_suggestions": mesh_suggestions,
             "total_count": total_count,
             "total_pages": total_pages_capped,
@@ -3789,59 +3814,90 @@ async def export(
                         redis, cache_key, [p.to_dict() for p in papers], 900
                     )
         else:
-            term = build_pubmed_term(
-                q,
-                year_min=year_min_i,
-                year_max=year_max_i,
-                has_abstract=has_abstract,
-                mesh=mesh,
-                mesh_mode=mesh_mode,
-            )
-            if not term:
-                raise HTTPException(400, "Query invalid")
-
-            retstart = (page - 1) * n
-            if retstart >= PUBMED_MAX_PAGEABLE_RESULTS:
-                papers = []
-            else:
-                cache_key = make_cache_key(
-                    "export:pubmed:page",
-                    {
-                        "q": q,
-                        "page": page,
-                        "n": n,
-                        "sort": ui_sort,
-                        "year_min": year_min,
-                        "year_max": year_max,
-                        "has_abstract": has_abstract,
-                        "mesh": mesh,
-                        "mesh_mode": mesh_mode,
-                    },
+            if snapshot_id:
+                signature = pubmed_snapshot_signature(
+                    q=q,
+                    sort=ui_sort,
+                    page=page,
+                    n=n,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=bool(has_abstract),
+                    mesh=mesh,
+                    mesh_mode=mesh_mode,
                 )
-                cached = await cache_get_json(redis, cache_key) if redis else None
-                if cached:
-                    papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
+
+                snapshot_papers = await load_pubmed_snapshot(
+                    redis,
+                    snapshot_id=snapshot_id,
+                    request_signature=signature,
+                )
+
+                if snapshot_papers is None:
+                    raise HTTPException(
+                        status_code=410,
+                        detail="PubMed snapshot expired or invalid. Run the search again.",
+                    )
+
+                papers = [
+                    Paper.from_dict(item)
+                    for item in snapshot_papers
+                ]
+
+            else:
+                term = build_pubmed_term(
+                    q,
+                    year_min=year_min_i,
+                    year_max=year_max_i,
+                    has_abstract=has_abstract,
+                    mesh=mesh,
+                    mesh_mode=mesh_mode,
+                )
+                if not term:
+                    raise HTTPException(400, "Query invalid")
+
+                retstart = (page - 1) * n
+                if retstart >= PUBMED_MAX_PAGEABLE_RESULTS:
+                    papers = []
                 else:
-                    res = await pubmed_search_page(
-                        term,
-                        max_results=n,
-                        retstart=retstart,
-                        sort=pubmed_sort,
-                        api_key=NCBI_API_KEY,
-                        tool=TOOL_NAME,
-                        email=CONTACT_EMAIL,
+                    cache_key = make_cache_key(
+                        "export:pubmed:page",
+                        {
+                            "q": q,
+                            "page": page,
+                            "n": n,
+                            "sort": ui_sort,
+                            "year_min": year_min,
+                            "year_max": year_max,
+                            "has_abstract": has_abstract,
+                            "mesh": mesh,
+                            "mesh_mode": mesh_mode,
+                        },
                     )
-                    papers = await pubmed_fetch_details(
-                        res.pmids,
-                        api_key=NCBI_API_KEY,
-                        tool=TOOL_NAME,
-                        email=CONTACT_EMAIL,
-                    )
-                    papers = papers or []
-                    if redis:
-                        await cache_set_json(
-                            redis, cache_key, [p.to_dict() for p in papers], 600
+                    cached = await cache_get_json(redis, cache_key) if redis else None
+                    if cached:
+                        papers = [Paper.from_dict(d) for d in cached if isinstance(d, dict)]
+                    else:
+                        res = await pubmed_search_page(
+                            term,
+                            max_results=n,
+                            retstart=retstart,
+                            sort=pubmed_sort,
+                            api_key=NCBI_API_KEY,
+                            tool=TOOL_NAME,
+                            email=CONTACT_EMAIL,
                         )
+                        papers = await pubmed_fetch_details(
+                            res.pmids,
+                            api_key=NCBI_API_KEY,
+                            tool=TOOL_NAME,
+                            email=CONTACT_EMAIL,
+                        )
+                        papers = papers or []
+                        if redis:
+                            await cache_set_json(
+                                redis, cache_key, [p.to_dict() for p in papers], 600
+                            )
 
     # EUROPE PMC
     elif source == "europe_pmc":
